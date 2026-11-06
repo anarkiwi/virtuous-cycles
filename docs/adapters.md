@@ -32,7 +32,9 @@ Reads [Infer](https://fbinfer.com/docs/checker-cost)'s `costs-report.json`
 | `default`     | none                           | value for symbols not in `symbols`; without it an unlisted symbol is an error |
 | `key`         | `{procedure_id}`               | `str.format` template over the entry (`procedure_id`, `procedure_name`, `hash`) and its `loc` (`file`, `lnum`) |
 | `cost`        | `exec_cost`                    | cost field to read |
-| `unknown_key` | `infer-cost:unknown`           | key holding the number of unbounded procedures |
+| `unknown_key` | `infer-cost:unknown`           | key holding the number of keys whose cost is ⊤ (`inf`) |
+| `callgraph`   | none                           | output of `infer debug --procedures --procedures-name --procedures-callees --select all`; keeps only procedures reached from `roots` |
+| `roots`       | required with `callgraph`      | entry-point procedure globs (`fnmatch`, case-sensitive), e.g. `["ns::Detector::detect"]`; one that matches nothing is an error |
 
 - `degree` is Infer's encoded degree divided by 100: `1` for O(n), `2` for
   O(n x m), and a log factor adds `0.01`.
@@ -66,3 +68,27 @@ per file.
 | `cwd`  | working directory |
 
 The command must exit 0 and print a JSON object of key to number.
+
+### Reachability
+
+With `callgraph` and `roots`, only procedures reachable from the roots are
+kept, and the unknown count covers only those. Names in the call graph are
+normalised to `procedure_id` spelling: the `{id}`/`(id)` suffix, a leading
+`class ` and the parameter list are dropped; commas and `<`/`>` inside template
+arguments and C++ operator names (`operator()`, `operator->`, `operator<<`)
+are not separators.
+
+```toml
+[[metric]]
+name = "boxer-cost"
+adapter = "infer-cost"
+budget = "budgets/boxer-cost.json"
+[metric.options]
+report = "infer-out/costs-report.json"
+callgraph = "procs.txt"
+roots = ["ns::Detector::detect", "ns::SceneBoxer::cut"]
+```
+
+The unknown count is an ordinary key, so the same budget ratchets it: select
+only `infer-cost:unknown` in a metric to hold just the count of unbounded
+procedures.

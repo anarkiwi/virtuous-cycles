@@ -1,0 +1,102 @@
+class Pair<int,long>::operator()(18244103633668317586)
+  source_file: example.cpp
+  proc_name: class Pair<int,long>::operator()(18244103633668317586)
+  defined: true
+  callees: 
+  
+class Pair<int,long>::operator<(9357256370785042172)
+  source_file: example.cpp
+  proc_name: class Pair<int,long>::operator<(9357256370785042172)
+  defined: true
+  callees: 
+  
+class dsp::Window::sum(16974432264562397713)
+  source_file: example.cpp
+  proc_name: class dsp::Window::sum(16974432264562397713)
+  defined: true
+  callees: linear
+  
+class dsp::Window::sum(5863292086742668102)
+  source_file: example.cpp
+  proc_name: class dsp::Window::sum(5863292086742668102)
+  defined: true
+  callees: 
+  
+class lambda_example.cpp:88_264f29e8::__invoke(5342383103944878001)
+  source_file: example.cpp
+  proc_name: class lambda_example.cpp:88_264f29e8::__invoke(5342383103944878001)
+  defined: false
+  callees: 
+  
+class lambda_example.cpp:88_264f29e8::lambda_~(lambda_at_example.cpp:88_a7dd8f96(4132842077111324982)
+  source_file: example.cpp
+  proc_name: class lambda_example.cpp:88_264f29e8::lambda_~(lambda_at_example.cpp:88_a7dd8f96(4132842077111324982)
+  defined: false
+  callees: 
+  
+class lambda_example.cpp:88_264f29e8::operator()(5248123939431739201)
+  source_file: example.cpp
+  proc_name: class lambda_example.cpp:88_264f29e8::operator()(5248123939431739201)
+  defined: true
+  callees: 
+  
+class lambda_example.cpp:88_264f29e8::operator_int_(*)(int)(13375893191956439559)
+  source_file: example.cpp
+  proc_name: class lambda_example.cpp:88_264f29e8::operator_int_(*)(int)(13375893191956439559)
+  defined: false
+  callees: 
+  
+compare{11981109455690282022}
+  source_file: example.cpp
+  proc_name: compare{11981109455690282022}
+  defined: true
+  callees: Pair<int,long>::operator(), Pair<int,long>::operator<, lambda_example.cpp:88_264f29e8::operator()
+  
+constant{17306594200042831283}
+  source_file: example.cpp
+  proc_name: constant{17306594200042831283}
+  defined: true
+  callees: 
+  
+dsp::halving{17203671382112116929}
+  source_file: example.cpp
+  proc_name: dsp::halving{17203671382112116929}
+  defined: true
+  callees: 
+  
+dsp::product{15592970880253070715}
+  source_file: example.cpp
+  proc_name: dsp::product{15592970880253070715}
+  defined: true
+  callees: 
+  
+linear{2600885711533757196}
+  source_file: example.cpp
+  proc_name: linear{2600885711533757196}
+  defined: true
+  callees: 
+  
+opaque{6983899002851600556}
+  source_file: example.cpp
+  proc_name: opaque{6983899002851600556}
+  defined: false
+  callees: 
+  
+quadratic{11386279044478633564}
+  source_file: example.cpp
+  proc_name: quadratic{11386279044478633564}
+  defined: true
+  callees: 
+  
+unknown{3894123902349434700}
+  source_file: example.cpp
+  proc_name: unknown{3894123902349434700}
+  defined: true
+  callees: opaque
+  
+use{16575356771468419075}
+  source_file: example.cpp
+  proc_name: use{16575356771468419075}
+  defined: true
+  callees: dsp::Window::sum, dsp::Window::sum
+  

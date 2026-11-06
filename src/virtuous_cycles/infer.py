@@ -6,6 +6,7 @@ import re
 
 from tqdm import tqdm
 
+from virtuous_cycles import callgraph
 from virtuous_cycles.adapters import register
 
 SUPERSCRIPTS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
@@ -158,6 +159,20 @@ class Polynomial:
         return float(self.default)
 
 
+def cost_value(cost, options):
+    """One procedure's cost: ``inf`` for ⊤, else its degree or polynomial."""
+    degree = cost["hum"]["hum_degree"]
+    if degree in ("Top", "Unreachable"):
+        return math.inf if degree == "Top" else 0.0
+    if options.get("value", "degree") == "degree":
+        return cost.get("degree", 0) / 100
+    return Polynomial(
+        cost["hum"]["hum_polynomial"],
+        options.get("symbols", {}),
+        options.get("default"),
+    ).evaluate()
+
+
 @register("infer-cost")
 def infer_cost(options):
     """Per-procedure cost from Infer's ``costs-report.json``.
@@ -165,31 +180,27 @@ def infer_cost(options):
     Keys come from the ``key`` template; procedures sharing a key keep the
     worst value. See docs/adapters.md for the options.
     """
-    report = options.get("report", "infer-out/costs-report.json")
-    with open(report, encoding="utf-8") as f:
+    if options.get("value", "degree") not in ("degree", "polynomial"):
+        raise ValueError(
+            f"infer-cost: value must be degree or polynomial: {options['value']!r}"
+        )
+    with open(
+        options.get("report", "infer-out/costs-report.json"), encoding="utf-8"
+    ) as f:
         entries = json.load(f)
-    mode = options.get("value", "degree")
-    if mode not in ("degree", "polynomial"):
-        raise ValueError(f"infer-cost: value must be degree or polynomial: {mode!r}")
-    template = options.get("key", "{procedure_id}")
-    field = options.get("cost", "exec_cost")
-    symbols, default = options.get("symbols", {}), options.get("default")
-    out, unknown = {}, 0
+    if "callgraph" in options:
+        with open(options["callgraph"], encoding="utf-8") as f:
+            keep = callgraph.reached(callgraph.parse(f), options["roots"])
+        entries = [e for e in entries if e["procedure_id"] in keep]
+    template, field = options.get("key", "{procedure_id}"), options.get(
+        "cost", "exec_cost"
+    )
+    out = {}
     for entry in tqdm(
         entries, desc="infer-cost", unit="proc", disable=None, leave=False
     ):
-        cost = entry[field]
-        if cost["hum"]["hum_degree"] == "Top":
-            value, unknown = math.inf, unknown + 1
-        elif cost["hum"]["hum_degree"] == "Unreachable":
-            value = 0.0
-        elif mode == "degree":
-            value = cost.get("degree", 0) / 100
-        else:
-            value = Polynomial(
-                cost["hum"]["hum_polynomial"], symbols, default
-            ).evaluate()
         key = template.format(**entry, **entry.get("loc", {}))
-        out[key] = max(value, out.get(key, -math.inf))
+        out[key] = max(cost_value(entry[field], options), out.get(key, -math.inf))
+    unknown = sum(math.isinf(v) for v in out.values())
     out[options.get("unknown_key", "infer-cost:unknown")] = float(unknown)
     return out

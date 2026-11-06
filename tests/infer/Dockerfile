@@ -7,21 +7,26 @@ RUN apt-get update \
 
 FROM toolchain AS infer
 ARG INFER_VERSION=v1.3.0
-RUN curl -fsSL "https://github.com/facebook/infer/releases/download/${INFER_VERSION}/infer-linux-x86_64-${INFER_VERSION}.tar.xz" \
-    | tar -xJ -C /opt \
+ARG INFER_SHA256=02be62ba931cb43e2d42bbf7abf4bd9a410cf8464cce5453934e25c90a825850
+RUN curl -fsSL -o /tmp/infer.tar.xz "https://github.com/facebook/infer/releases/download/${INFER_VERSION}/infer-linux-x86_64-${INFER_VERSION}.tar.xz" \
+    && echo "${INFER_SHA256}  /tmp/infer.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/infer.tar.xz -C /opt && rm /tmp/infer.tar.xz \
     && ln -s "/opt/infer-linux-x86_64-${INFER_VERSION}/bin/infer" /usr/local/bin/infer
 
 FROM infer AS report
 ENV LANG=C.UTF-8
 WORKDIR /work
 COPY example.cpp .
-RUN infer --cost-only -o infer-out -- g++ -c example.cpp
+RUN infer --cost-only -o infer-out -- g++ -c example.cpp \
+    && infer debug -o infer-out --procedures --procedures-name --procedures-callees --select all > procs.txt \
+    && cp infer-out/costs-report.json .
 
 FROM scratch AS fixture
-COPY --from=report /work/infer-out/costs-report.json /
+COPY --from=report /work/costs-report.json /work/procs.txt /
 
 FROM toolchain AS check
-COPY --from=report /work/infer-out/costs-report.json /fresh.json
-COPY costs-report.json /committed.json
+COPY --from=report /work/costs-report.json /work/procs.txt /fresh/
+COPY costs-report.json procs.txt /committed/
 RUN norm='map({procedure_id, procedure_name, loc: .loc.file, degree: .exec_cost.degree, hum: .exec_cost.hum}) | sort_by(.procedure_id, .hum.hum_polynomial)' \
-    && diff <(jq -S "$norm" /committed.json) <(jq -S "$norm" /fresh.json)
+    && diff <(jq -S "$norm" /committed/costs-report.json) <(jq -S "$norm" /fresh/costs-report.json) \
+    && diff /committed/procs.txt /fresh/procs.txt

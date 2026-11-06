@@ -26,6 +26,10 @@ def test_degree_from_real_report():
         "dsp::product": 2.0,
         "dsp::Window::sum": 1.0,
         "use": 1.0,
+        "compare": 1.0,
+        "Pair<int,long>::operator()": 1.0,
+        "Pair<int,long>::operator<": 0.0,
+        "lambda_example.cpp:88_264f29e8::operator()": 0.0,
         "infer-cost:unknown": 1.0,
     }
 
@@ -135,3 +139,53 @@ def test_unreachable_is_zero(tmp_path):
     for value in ("degree", "polynomial"):
         got = get_adapter("infer-cost")({"report": str(report), "value": value})
         assert got == {"dead": 0.0, "infer-cost:unknown": 0.0}
+
+
+PROCS = Path(__file__).parent / "infer" / "procs.txt"
+
+
+@pytest.mark.parametrize(
+    "roots,keys",
+    [
+        (["use"], {"use", "dsp::Window::sum", "linear"}),
+        (
+            ["compare"],
+            {
+                "compare",
+                "Pair<int,long>::operator()",
+                "Pair<int,long>::operator<",
+                "lambda_example.cpp:88_264f29e8::operator()",
+            },
+        ),
+        (
+            ["unknown", "dsp::*"],
+            {"unknown", "dsp::halving", "dsp::product", "dsp::Window::sum", "linear"},
+        ),
+    ],
+)
+def test_reachability_filter(roots, keys):
+    got = infer(callgraph=str(PROCS), roots=roots)
+    assert got.pop("infer-cost:unknown") == ("unknown" in keys)
+    assert set(got) == keys
+
+
+PROBES = sorted((Path(__file__).parent / "infer" / "probe").glob("costs-report-*.json"))
+
+
+@pytest.mark.parametrize("report", PROBES, ids=lambda p: p.stem)
+def test_probe_reports_parse_in_both_modes(report):
+    options = {"report": str(report)}
+    degree = get_adapter("infer-cost")(options)
+    poly = get_adapter("infer-cost")({**options, "value": "polynomial", "default": 64})
+    assert degree.keys() == poly.keys()
+    for key, value in degree.items():
+        assert math.isinf(value) == math.isinf(poly[key]), key
+
+
+def test_probe_c_locale_polynomials():
+    report = str(Path(__file__).parent / "infer" / "probe" / "costs-report-2.json")
+    got = get_adapter("infer-cost")(
+        {"report": report, "value": "polynomial", "symbols": {"hi": 10, "lo": 4}}
+    )
+    assert got["outer_const_inner_stride"] == 10250 + 12288 * 6
+    assert got["infer-cost:unknown"] == sum(map(math.isinf, got.values()))

@@ -70,3 +70,21 @@ int use(const int *a, std::size_t n) {
   dsp::Window w{n};
   return w.sum(a) + w.sum(a, n);
 }
+
+template <typename A, typename B> struct Pair {
+  A a;
+  B b;
+  bool operator<(const Pair &o) const { return a < o.a; }
+  A operator()(const A *v, B n) const {
+    A s = 0;
+    for (B i = 0; i < n; ++i) {
+      s += v[i];
+    }
+    return s;
+  }
+};
+
+int compare(const Pair<int, long> &x, const Pair<int, long> &y, const int *v) {
+  auto bump = [](int k) { return k + 1; };
+  return (x < y) + bump(x.a) + x(v, y.b);
+}
