@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run the CI checks (or any command) in the test image against this checkout.
+set -e
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+docker build -q --target test -t virtuous-cycles:test "$root" >/dev/null
+[ $# -gt 0 ] || set -- sh -c 'black --check src tests && pylint src && pylint --disable=missing-docstring,redefined-outer-name tests && pytest'
+exec docker run --rm --tmpfs /tmp:exec -u "$(id -u):$(id -g)" --cpus 2 \
+  -e HOME=/tmp -e PYLINTHOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONPATH="$root/src" \
+  -e PYTEST_XDIST_AUTO_NUM_WORKERS=2 -e COVERAGE_FILE=/tmp/.coverage \
+  -v "$root:$root" -w "$root" virtuous-cycles:test "$@"

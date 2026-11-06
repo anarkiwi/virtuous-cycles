@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling==1.33.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "virtuous-cycles"
+version = "0.1.0"
+description = "Ratchet numeric code metrics against budgets that only get stricter"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = ["tqdm>=4.66"]
+
+[project.scripts]
+virtuous-cycles = "virtuous_cycles.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-n auto --cov=virtuous_cycles --cov-report=term-missing --cov-fail-under=85"
+
+[tool.coverage.run]
+branch = true
+source = ["virtuous_cycles"]
+
+[tool.pylint.main]
+disable = ["too-few-public-methods", "too-many-arguments", "too-many-positional-arguments"]
