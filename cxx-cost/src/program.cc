@@ -60,11 +60,12 @@ CostRef Cost::call(std::string Usr, std::string Callee, Site At, bool Virtual,
   return C;
 }
 
-CostRef Cost::hoist(CostRef E) {
+CostRef Cost::hoist(CostRef E, bool Run) {
   if (E->zero())
     return E;
   auto C = std::make_shared<Cost>();
   C->K = Hoist;
+  C->Run = Run;
   C->Kids = {E};
   return C;
 }
@@ -148,14 +149,16 @@ Program::Parts Program::eval(const Cost &C, const std::set<std::string> &Scc,
                              const std::string &Owner) {
   switch (C.K) {
   case Cost::Leaf:
-    return {C.P, {}};
+    return {C.P, {}, {}};
   case Cost::Scale: {
     Parts V = eval(*C.Kids[0], Scc, Ledger, Owner);
-    return {C.P * V.Scaled, V.Hoisted};
+    return {C.P * V.Scaled, V.Hoisted, V.Run};
   }
   case Cost::Hoist: {
     Parts V = eval(*C.Kids[0], Scc, Ledger, Owner);
-    return {{}, V.Scaled + V.Hoisted};
+    if (C.Run)
+      return {{}, {}, V.total()};
+    return {{}, V.Scaled + V.Hoisted, V.Run};
   }
   case Cost::Sum: {
     Parts R;
@@ -163,18 +166,17 @@ Program::Parts Program::eval(const Cost &C, const std::set<std::string> &Scc,
       Parts V = eval(*K, Scc, Ledger, Owner);
       R.Scaled = R.Scaled + V.Scaled;
       R.Hoisted = R.Hoisted + V.Hoisted;
+      R.Run = R.Run + V.Run;
     }
     return R;
   }
   case Cost::Join: {
-    // The larger branch is not known to be the same one for both parts, so
-    // a join keeps its whole cost under the loops around it.
+    // The larger branch is not known to be the same one for every part, so a
+    // join keeps its whole cost under the loops around it.
     Poly R;
-    for (const CostRef &K : C.Kids) {
-      Parts V = eval(*K, Scc, Ledger, Owner);
-      R = R.join(V.Scaled + V.Hoisted);
-    }
-    return {R, {}};
+    for (const CostRef &K : C.Kids)
+      R = R.join(eval(*K, Scc, Ledger, Owner).total());
+    return {R, {}, {}};
   }
   case Cost::Call:
   case Cost::Targets:
@@ -194,23 +196,30 @@ Program::Parts Program::eval(const Cost &C, const std::set<std::string> &Scc,
                         "virtual call to " + C.Callee + " has no overrider",
                         C.At});
     }
-    return {Poly::symbol(Unbounded), {}};
+    return {Poly::symbol(Unbounded), {}, {}};
   }
-  Poly R;
+  // One callee keeps its run-wide total apart; several are joined, which
+  // keeps that total under the loops around the call too.
+  std::vector<Parts> Known;
   for (const std::string &U : Cands) {
     if (Scc.count(U))
       continue;
     auto It = Resolved.find(U);
     if (It != Resolved.end()) {
-      R = R.join(It->second);
+      Known.push_back(It->second);
       continue;
     }
     Ledger.push_back({"external", Owner,
                       "call to " + C.Callee + " whose body is not analysed",
                       C.At});
-    R = R.join(Poly::symbol(Unbounded));
+    Known.push_back({Poly::symbol(Unbounded), {}, {}});
   }
-  return {R, {}};
+  if (Known.size() == 1)
+    return {Known[0].Scaled + Known[0].Hoisted, {}, Known[0].Run};
+  Poly R;
+  for (const Parts &K : Known)
+    R = R.join(K.total());
+  return {R, {}, {}};
 }
 
 std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
@@ -255,12 +264,12 @@ std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
     for (const std::string &M : Scc) {
       Function &F = Functions[M];
       Parts Split = eval(*F.Body, Scc, F.Ledger, F.Name);
-      Poly P = Split.Scaled + Split.Hoisted;
       if (!Cyclic) {
-        Resolved[M] = P;
+        // A function's own totals end here; its run-wide one goes on up.
+        Resolved[M] = {Split.Scaled + Split.Hoisted, {}, Split.Run};
         return;
       }
-      Local += P;
+      Local += Split.total();
       if (F.Recursion)
         Bound = Bound ? Bound->join(*F.Recursion) : *F.Recursion;
     }
@@ -273,7 +282,7 @@ std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
       }
     }
     for (const std::string &M : Scc)
-      Resolved[M] = *Bound * Local;
+      Resolved[M] = {*Bound * Local, {}, {}};
   };
   for (const auto &[U, F] : Functions)
     if (!Index.count(U))
@@ -291,7 +300,7 @@ std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
     for (const auto &[U, F] : Functions)
       if (Glob->match(F.Name) || Glob->match(F.Plain)) {
         E.Functions.push_back(F.Name);
-        E.Cost = E.Cost.join(Resolved[U].name(Symbols));
+        E.Cost = E.Cost.join(Resolved[U].total().name(Symbols));
         Work.push_back(U);
       }
     if (Work.empty()) {
@@ -314,7 +323,7 @@ std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
       for (const std::string &U : Seen)
         if (Functions.count(U))
           E.Breakdown.emplace_back(Functions[U].Name,
-                                   Resolved[U].name(Symbols));
+                                   Resolved[U].total().name(Symbols));
     std::sort(E.Breakdown.begin(), E.Breakdown.end(),
               [](const auto &A, const auto &B) {
                 return A.first != B.first ? A.first < B.first

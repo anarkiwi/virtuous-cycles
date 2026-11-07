@@ -18,7 +18,7 @@ so CI need not build it. In GitHub Actions, `uses: anarkiwi/virtuous-cycles/cxx-
 pulls it and puts a `vc-cxx-cost` command on `PATH`:
 
 ```yaml
-- uses: anarkiwi/virtuous-cycles/cxx-cost@v0.4.0
+- uses: anarkiwi/virtuous-cycles/cxx-cost@v0.5.0
 - run: vc-cxx-cost -p build --entry 'ns::Detector::detect' -o cxx-cost.json
 ```
 
@@ -116,6 +116,25 @@ for (Channel &C : Channels)                 // 9 channels
 
 costs `kNotes` ticks, not `9 * kNotes`.
 
+`VC_TOTAL` is per call of its function. When the loop is in a function that the
+loop over channels *calls*, the total has to cross the call, and
+`VC_RUN_TOTAL(expr)` does: it bounds the trip count summed over every execution
+of the loop in one run of the entry point, however many calls deep, and neither
+the loops around it in its function nor those around the calls that reach it
+multiply it.
+
+```cpp
+void Channel::tick() {                      // called once per channel
+  VC_RUN_TOTAL(kNotes) for (Note *N : notes_) N->tick();   // 9 channels, kNotes notes in all
+}
+```
+
+Only the loop's own cost moves out; its setup and the call overhead still scale
+as usual. A loop reached from two call sites counts once per site. The total is
+scaled by the loops around the call when the call is joined with others (a
+virtual call, `VC_TARGETS`, or either branch of `?:`/`if`) or is in a recursive
+cycle, so those are over-counted rather than under-counted.
+
 A limit's bound comes from: integer constants; namespace or class constants
 (a *symbol* named after the variable, or `VC_SYMBOL(name)`), whose value is
 reported; `VC_SIZE` on the variable, field, parameter or function; `const`
@@ -180,7 +199,8 @@ other compiler.
 | macro | on | meaning |
 |---|---|---|
 | `VC_BOUND(expr)` | a loop | its trip count |
-| `VC_TOTAL(expr)` | a loop | its trip count summed over the loops around it |
+| `VC_TOTAL(expr)` | a loop | its trip count summed over the loops around it in its function |
+| `VC_RUN_TOTAL(expr)` | a loop | its trip count summed over every execution in one run of the entry point, across calls |
 | `VC_TARGETS(a, b)` | a statement | one operation plus the costliest of the named functions (globs over qualified names, as for `--entry`) |
 | `VC_COST(expr)` | a statement or function declaration | its whole cost |
 | `VC_SIZE(expr)` | a variable, field, parameter or function | upper bound of the value (integer) or size (container) |

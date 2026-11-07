@@ -22,6 +22,15 @@
 /// the loops around it in the same function (not per iteration), e.g. the
 /// notes of all channels when every channel draws on one shared pool.
 #define VC_TOTAL(...) VC_ANNOTATE("vc::total", __VA_ARGS__)
+/// Like VC_TOTAL, but summed over every execution of the loop in one run of the
+/// entry point, however many calls deep: for work that every caller in the run
+/// shares, such as a loop over a pool that all of them draw on, in a function
+/// that a loop elsewhere calls once per channel. The loop's cost then neither
+/// multiplies by the loops around it in its own function nor by those around
+/// the calls that reach it. A loop reached from two call sites counts once per
+/// site; a call joined with others (a virtual call, VC_TARGETS) or in a
+/// recursive cycle is scaled by the loops around it as usual.
+#define VC_RUN_TOTAL(...) VC_ANNOTATE("vc::runtotal", __VA_ARGS__)
 /// Before a statement: one operation plus the cost of the most expensive of the
 /// named functions (globs over qualified names). For a call through a function
 /// pointer, `VC_TARGETS(ns::a, ns::b)` names what it can reach.
