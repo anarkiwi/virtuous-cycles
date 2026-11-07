@@ -1,0 +1,18 @@
+# A compilation database: files chosen by regex, arguments dropped, paths
+# relative to a root, the report written to a file. Calls, virtual overriders
+# and a header function resolve across translation units; a constant with a
+# different value in each is a symbol with no value.
+RUN: mkdir -p %t && cp %S/Inputs/db/a.cc %S/Inputs/db/b.cc %S/Inputs/db/c.cc %S/Inputs/db/shared.h %t/
+RUN: sed "s|DIR|%t|g" %S/Inputs/db/compile_commands.json > %t/compile_commands.json
+RUN: not %cost -p %t --files '/[ab]\.cc$' --entry entry 2>&1 | FileCheck --check-prefix=BOGUS %s
+BOGUS: built with BOGUS
+BOGUS: a.cc did not compile
+RUN: %cost -p %t --files '/[ab]\.cc$' --drop-arg '^-DBOGUS$' --root %t --entry entry --entry across -o %t/out.json 2>&1 | FileCheck --check-prefix=PROGRESS %s
+PROGRESS: [2/2 {{.*}} TU/s]
+RUN: FileCheck %s < %t/out.json
+CHECK: "kConf": null
+CHECK-LABEL: "entry":
+CHECK: "polynomial": "3*kConf^2 + 12*kConf + 5"
+CHECK: "ledger": []
+CHECK-LABEL: "across":
+CHECK: "polynomial": "2"
