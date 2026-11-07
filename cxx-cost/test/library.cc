@@ -2,7 +2,7 @@
 // ordered containers, container growth, callables (function pointers,
 // functors, generic lambdas), and ranges with no bound.
 // RUN: %cost --entry 'ranges' --entry 'calls' --entry 'unsized' --entry \
-// RUN:   'access' %s %flags | FileCheck %s
+// RUN:   'access' --entry 'moves' %s %flags | FileCheck %s
 // CHECK-LABEL: "ranges":
 // CHECK: "polynomial": "kN*log2(kN) + 3*kN + 2*kQ + 2*log2(kN) + 31"
 // CHECK-LABEL: "calls":
@@ -13,10 +13,16 @@
 // CHECK: "reason": "call to std::find on a range with no bound"
 // CHECK-LABEL: "access":
 // CHECK: "polynomial": "4*kN + 7"
+// CHECK-LABEL: "moves":
+// CHECK: "polynomial": "? + 18"
+// CHECK-NOT: std::move
+// CHECK: "reason": "call to std::vector::operator= on a range with no bound"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <map>
+#include <string>
 #include <vc/cost.h>
 #include <vector>
 
@@ -65,4 +71,14 @@ int access(Owner &O, Values *P) {
   for (int X : *P)
     S += X;
   return S;
+}
+
+int moves(std::vector<int> &W, std::vector<int> &X) {
+  W = std::move(X);
+  std::vector<int> Y(std::move(W));
+  std::string S("abc");
+  int *P = new int(3);
+  delete P;
+  X = Y;
+  return std::isnan(nanf("")) + Y.size() + S.size();
 }

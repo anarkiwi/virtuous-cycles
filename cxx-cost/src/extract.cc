@@ -7,6 +7,7 @@
 #include "clang/AST/StmtCXX.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Index/USRGeneration.h"
+#include "clang/Lex/Lexer.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
 
@@ -35,12 +36,15 @@ const char *const RangeAlgorithms =
 const char *const MathFunctions =
     "{sqrt,cbrt,exp,exp2,expm1,log,log2,log10,log1p,pow,sin,cos,tan,asin,acos,"
     "atan,atan2,sinh,cosh,tanh,erf,erfc,lgamma,tgamma,fabs,floor,ceil,round,"
-    "lround,llround,trunc,fmod,remainder,hypot,fmin,fmax,fma,copysign,"
-    "nearbyint,rint,lrint,ldexp,frexp,modf,abs,labs,llabs,isnan,isinf,"
-    "isfinite,signbit}{,f,l}";
+    "lround,llround,lrint,llrint,trunc,fmod,remainder,hypot,fmin,fmax,fma,"
+    "copysign,"
+    "nearbyint,rint,ldexp,frexp,modf,abs,labs,llabs,isnan,isinf,"
+    "isfinite,signbit,nan}{,f,l}";
 
-Model model(Model::Kind K, int Arg, const char *Glob) {
-  return cantFail(Model::create(K, Arg, Glob));
+Model model(Model::Kind K, int Arg, const char *Glob, unsigned MinArgs = 0) {
+  Model M = cantFail(Model::create(K, Arg, Glob));
+  M.MinArgs = MinArgs;
+  return M;
 }
 
 std::string text(const AnnotateAttr *A) {
@@ -121,6 +125,8 @@ public:
 private:
   Site site(SourceLocation L) const;
   std::string usr(const Decl *D) const;
+  /// The source text of `S`, whitespace collapsed, in backquotes.
+  std::string source(const Stmt *S) const;
   std::string name(const FunctionDecl *FD) const;
   CostRef unbounded(llvm::StringRef Kind, std::string Reason, SourceLocation L);
   std::optional<Poly> annotated(const Decl *D, llvm::StringRef Tag,
@@ -130,8 +136,8 @@ private:
   CostRef stmt(const Stmt *S, std::optional<Poly> Bound = std::nullopt);
   CostRef expr(const Stmt *S);
   CostRef loop(const Stmt *S, std::optional<Poly> Bound,
-               std::optional<Poly> Inferred, const char *Why, CostRef Once,
-               CostRef Each);
+               std::optional<Poly> Inferred, const std::string &Why,
+               CostRef Once, CostRef Each);
   CostRef call(const FunctionDecl *FD, const Expr *Site, const Expr *Object,
                llvm::ArrayRef<const Expr *> Args);
   CostRef callable(llvm::ArrayRef<const Expr *> Args);
@@ -163,6 +169,18 @@ Site Extractor::site(SourceLocation L) const {
   if (!Opt.Root.empty() && R.consume_front(Opt.Root))
     R.consume_front("/");
   return {R.str(), P.getLine(), P.getColumn()};
+}
+
+std::string Extractor::source(const Stmt *S) const {
+  if (!S)
+    return "``";
+  llvm::StringRef Text = Lexer::getSourceText(
+      SM.getExpansionRange(S->getSourceRange()), SM, Ctx.getLangOpts());
+  std::string Out;
+  for (char C : Text)
+    if (!std::isspace((unsigned char)C) || (!Out.empty() && Out.back() != ' '))
+      Out += std::isspace((unsigned char)C) ? ' ' : C;
+  return "`" + Out + "`";
 }
 
 std::string Extractor::usr(const Decl *D) const {
@@ -271,7 +289,7 @@ void Extractor::function(const FunctionDecl *FD) {
 }
 
 CostRef Extractor::loop(const Stmt *S, std::optional<Poly> Bound,
-                        std::optional<Poly> Inferred, const char *Why,
+                        std::optional<Poly> Inferred, const std::string &Why,
                         CostRef Once, CostRef Each) {
   Poly T;
   if (Bound)
@@ -320,24 +338,28 @@ CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound) {
         F->getCond() ? Plus(One(), expr(F->getCond())) : Cost::leaf({});
     CostRef Inc = F->getInc() ? Plus(One(), expr(F->getInc())) : Cost::leaf({});
     std::optional<Poly> T = Bound ? std::nullopt : trip(F);
-    return loop(S, Bound, T, "for loop with no bound",
+    return loop(S, Bound, T,
+                "for loop with no bound on " + source(F->getCond()),
                 Plus(stmt(F->getInit()), Cond),
                 Plus(Plus(Cond, stmt(F->getBody())), Inc));
   }
   if (const auto *W = dyn_cast<WhileStmt>(S)) {
     CostRef Cond = Plus(One(), expr(W->getCond()));
-    return loop(S, Bound, std::nullopt, "while loop with no bound", Cond,
+    return loop(S, Bound, std::nullopt,
+                "while loop with no bound on " + source(W->getCond()), Cond,
                 Plus(Cond, stmt(W->getBody())));
   }
   if (const auto *D = dyn_cast<DoStmt>(S))
-    return loop(S, Bound, std::nullopt, "do loop with no bound", Cost::leaf({}),
+    return loop(S, Bound, std::nullopt,
+                "do loop with no bound on " + source(D->getCond()),
+                Cost::leaf({}),
                 Plus(Plus(One(), expr(D->getCond())), stmt(D->getBody())));
   if (const auto *R = dyn_cast<CXXForRangeStmt>(S)) {
     std::optional<Poly> T = Bound ? std::nullopt : size(R->getRangeInit());
-    std::string Why = "range over " +
+    std::string Why = "range over " + source(R->getRangeInit()) + " (" +
                       R->getRangeInit()->getType().getAsString() +
-                      ", which has no capacity";
-    return loop(S, Bound, T, Why.c_str(),
+                      "), which has no capacity";
+    return loop(S, Bound, T, Why,
                 Plus(One(), Plus(stmt(R->getInit()), expr(R->getRangeInit()))),
                 Plus(Plus(One(), expr(R->getLoopVariable()->getInit())),
                      stmt(R->getBody())));
@@ -467,9 +489,14 @@ CostRef Extractor::call(const FunctionDecl *FD, const Expr *E,
     return Cost::leaf(*C);
   if (system(FD)) {
     std::string Name = plain(FD);
+    const auto *Method = dyn_cast<CXXMethodDecl>(FD);
+    const auto *Ctor = dyn_cast<CXXConstructorDecl>(FD);
+    if ((Method && Method->isMoveAssignmentOperator()) ||
+        (Ctor && Ctor->isMoveConstructor()))
+      return Cost::leaf(Poly::constant(1));
     const Model *M = nullptr;
     for (const Model &X : Opt.Models)
-      if (X.Match.match(Name)) {
+      if (Args.size() >= X.MinArgs && X.Match.match(Name)) {
         M = &X;
         break;
       }
@@ -702,6 +729,10 @@ std::optional<Poly> Extractor::size(const Expr *E) {
   E = E->IgnoreParenImpCasts();
   if (const auto *M = dyn_cast<MaterializeTemporaryExpr>(E))
     return size(M->getSubExpr());
+  if (const auto *IL = dyn_cast<CXXStdInitializerListExpr>(E))
+    if (const auto *Init =
+            dyn_cast<InitListExpr>(IL->getSubExpr()->IgnoreParenImpCasts()))
+      return Poly::constant(Init->getNumInits());
   if (const auto *U = dyn_cast<UnaryOperator>(E))
     if (U->getOpcode() == UO_Deref)
       return size(U->getSubExpr());
@@ -942,7 +973,7 @@ std::vector<Model> builtinModels() {
       model(Model::Log, 0,
             "std::{lower_bound,upper_bound,equal_range,binary_search,push_heap,"
             "pop_heap}"),
-      model(Model::Linear, 0, RangeAlgorithms),
+      model(Model::Linear, 0, RangeAlgorithms, 2),
       model(Model::Linear, 1, "std::{fill_n,copy_n,generate_n,for_each_n}"),
       model(Model::Linear, 2, "{,std::}{memcpy,memmove,memset,memcmp}"),
       model(Model::Linear, 0, "std::ranges::*::operator()"),
@@ -952,9 +983,9 @@ std::vector<Model> builtinModels() {
             "at}"),
       model(Model::Linear, 0,
             "std::{vector,basic_string,deque}::{resize,reserve,assign,vector,"
-            "basic_string,deque}"),
+            "deque,operator=}"),
       model(Model::Linear, -1,
-            "std::{vector,basic_string,deque}::{insert,erase,operator=}"),
+            "std::{vector,basic_string,deque}::{insert,erase}"),
       model(Model::Const, 0, "std::*"),
       model(Model::Const, 0, "__gnu_cxx::*"),
       model(Model::Const, 0, "{__builtin_*,__cxa_*,__assert_fail}"),
@@ -962,6 +993,7 @@ std::vector<Model> builtinModels() {
       model(Model::Const, 0,
             "{strlen,strcmp,strncmp,printf,fprintf,snprintf,puts,abort,exit,"
             "malloc,calloc,free,getenv}"),
+      model(Model::Const, 0, "operator {new,delete}*"),
   };
 }
 
@@ -996,6 +1028,7 @@ std::vector<Model> parseModels(const std::string &Json, std::string &Error) {
       Error = toString(M.takeError());
       return {};
     }
+    M->MinArgs = unsigned(O->getInteger("min_args").value_or(0));
     Out.push_back(std::move(*M));
   }
   return Out;

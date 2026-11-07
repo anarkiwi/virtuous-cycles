@@ -12,7 +12,7 @@
 // CHECK: "polynomial": "6*kA + 3*kB + 22"
 // CHECK-LABEL: "written":
 // CHECK: "polynomial": "3*? + 5"
-// CHECK: "reason": "for loop with no bound"
+// CHECK: "reason": "for loop with no bound on `I < 10`"
 #include <algorithm>
 #include <cstddef>
 

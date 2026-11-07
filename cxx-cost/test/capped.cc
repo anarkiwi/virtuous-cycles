@@ -1,7 +1,7 @@
 // Loops over declared capacities: Capped, std::array and C arrays, by range
 // and by index; nested capped loops are degree 2 in the capacity.
-// RUN: %cost --entry 'pairs' --entry 'scan' --entry 'grid' %s %flags | \
-// RUN:   FileCheck %s
+// RUN: %cost --entry 'pairs' --entry 'scan' --entry 'grid' --entry 'listed' \
+// RUN:   %s %flags | FileCheck %s
 // CHECK: "symbols": {
 // CHECK-NEXT: "kBins": 16,
 // CHECK-NEXT: "kMaxBoxes": 64,
@@ -15,6 +15,8 @@
 // CHECK-LABEL: "grid":
 // CHECK: "polynomial": "3*kBins*kMaxBoxes + 3*kBins + 2*kRows + 5"
 // CHECK: "ledger": []
+// CHECK-LABEL: "listed":
+// CHECK: "polynomial": "10"
 #include <array>
 #include <vc/cost.h>
 
@@ -54,5 +56,12 @@ int grid(Grid &G) {
       S += Row[J];
   for (int T : G.Totals)
     S += T;
+  return S;
+}
+
+int listed() {
+  int S = 0;
+  for (int V : {1, 2, 3})
+    S += V;
   return S;
 }

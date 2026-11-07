@@ -27,6 +27,9 @@ struct Model {
     Opaque     ///< not modelled: unbounded
   } K = Opaque;
   int Arg = 0;
+  /// Calls with fewer arguments are not this model's (`std::move(x)` is not
+  /// the algorithm).
+  unsigned MinArgs = 0;
   /// The glob's text, which `Match` refers into.
   std::shared_ptr<const std::string> Pattern;
   llvm::GlobPattern Match;

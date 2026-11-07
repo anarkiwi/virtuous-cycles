@@ -2,7 +2,7 @@
 // defined elsewhere, a call through a pointer, std::function, and a system
 // function with no model. A models file can cost them.
 // RUN: %cost --entry 'outside' %s %flags | FileCheck %s
-// RUN: echo '[{"match": "getpid", "cost": "const"}, {"match": \
+// RUN: echo '[{"match": "getpid", "cost": "const", "min_args": 0}, {"match": \
 // RUN:   "std::function::operator()", "cost": "linear", "arg": 0}]' > %t.json
 // RUN: %cost --models %t.json --entry 'outside' %s %flags | FileCheck \
 // RUN:   --check-prefix=MODEL %s
