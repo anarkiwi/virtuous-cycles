@@ -35,13 +35,17 @@ using CostRef = std::shared_ptr<const Cost>;
 /// A cost expression: a polynomial, or sums, joins, scalings and calls whose
 /// cost is known only once every translation unit has been read.
 struct Cost {
-  enum Kind { Leaf, Sum, Join, Scale, Call } K = Leaf;
+  /// `Hoist` marks a total over every iteration of the loops around it in
+  /// its function: scaling by those loops leaves it alone. `Targets` is the
+  /// join of the functions named by `Names` (globs over qualified names).
+  enum Kind { Leaf, Sum, Join, Scale, Call, Hoist, Targets } K = Leaf;
   Poly P;
   std::vector<CostRef> Kids;
   // Call: the callee's USR and, for a virtual call, whether the callee itself
   // is pure (its overriders are then the only candidates).
   std::string Usr, Callee;
   bool Virtual = false, Pure = false;
+  std::vector<std::string> Names;
   Site At;
 
   static CostRef leaf(Poly P);
@@ -50,6 +54,8 @@ struct Cost {
   static CostRef scale(const Poly &P, CostRef E);
   static CostRef call(std::string Usr, std::string Callee, Site At,
                       bool Virtual = false, bool Pure = false);
+  static CostRef hoist(CostRef E);
+  static CostRef targets(std::vector<std::string> Names, Site At);
   bool zero() const { return K == Leaf && P.zero(); }
 };
 
@@ -68,6 +74,9 @@ struct Entry {
   std::vector<std::string> Functions;
   Poly Cost;
   std::vector<LedgerEntry> Ledger;
+  /// Every function the entry reaches and the cost of each, by name; only
+  /// filled when asked for.
+  std::vector<std::pair<std::string, Poly>> Breakdown;
 };
 
 class Program {
@@ -86,11 +95,15 @@ public:
   /// Each pattern's cost: the join of the functions it names, and the ledger
   /// of everything they reach. An error names a pattern matching nothing.
   std::vector<Entry> resolve(const std::vector<std::string> &Patterns,
-                             std::string &Error);
+                             std::string &Error, bool Breakdown = false);
 
 private:
-  Poly eval(const Cost &C, const std::set<std::string> &Scc,
-            std::vector<LedgerEntry> &Ledger, const std::string &Owner);
+  /// A cost split into what the loops around it scale and what they do not.
+  struct Parts {
+    Poly Scaled, Hoisted;
+  };
+  Parts eval(const Cost &C, const std::set<std::string> &Scc,
+             std::vector<LedgerEntry> &Ledger, const std::string &Owner);
   std::vector<std::string> candidates(const Cost &C) const;
   void edges(const Cost &C, std::set<std::string> &Out) const;
   std::map<std::string, Poly> Resolved;

@@ -5,11 +5,14 @@
 #include "clang/AST/ASTConsumer.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
+#include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "clang/Tooling/ArgumentsAdjusters.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/Threading.h"
@@ -45,10 +48,56 @@ static cl::opt<std::string>
            cl::desc("JSON models of system functions, tried before the "
                     "built-in ones"),
            cl::cat(Category));
+static cl::opt<std::string>
+    Weights("weights",
+            cl::desc("JSON {\"statement\": X, \"condition\": Y, \"call\": Z}: "
+                     "what each kind of operation costs (default 1)"),
+            cl::cat(Category));
+static cl::opt<std::string> Tolerate(
+    "tolerate-errors-in",
+    cl::desc("Do not fail on compile errors in files matching this regex "
+             "(third-party headers this clang rejects)"),
+    cl::cat(Category));
+static cl::opt<bool>
+    Breakdown("breakdown",
+              cl::desc("Report the cost of every function an entry reaches"),
+              cl::init(false), cl::cat(Category));
 static cl::opt<unsigned> Jobs("j", cl::desc("Parallel translation units"),
                               cl::init(0), cl::cat(Category));
 
 namespace {
+
+/// Prints every diagnostic but counts as errors only those outside the files
+/// `Ignore` matches, so a translation unit whose only errors are in them is
+/// not a failure.
+class Tolerant : public DiagnosticConsumer {
+public:
+  explicit Tolerant(const llvm::Regex &Ignore)
+      : Ignore(Ignore), Printer(llvm::errs(), Opts.get()) {}
+  void BeginSourceFile(const LangOptions &L, const Preprocessor *P) override {
+    Printer.BeginSourceFile(L, P);
+  }
+  void EndSourceFile() override { Printer.EndSourceFile(); }
+  void finish() override { Printer.finish(); }
+  void HandleDiagnostic(DiagnosticsEngine::Level Level,
+                        const Diagnostic &Info) override {
+    Printer.HandleDiagnostic(Level, Info);
+    bool Skip = false;
+    if (Level >= DiagnosticsEngine::Error && Info.hasSourceManager() &&
+        Info.getLocation().isValid()) {
+      const SourceManager &SM = Info.getSourceManager();
+      Skip =
+          Ignore.match(SM.getFilename(SM.getExpansionLoc(Info.getLocation())));
+    }
+    if (!Skip)
+      DiagnosticConsumer::HandleDiagnostic(Level, Info);
+  }
+
+private:
+  const llvm::Regex &Ignore;
+  llvm::IntrusiveRefCntPtr<DiagnosticOptions> Opts{new DiagnosticOptions};
+  TextDiagnosticPrinter Printer;
+};
 
 class Consumer : public ASTConsumer {
 public:
@@ -129,7 +178,27 @@ int main(int Argc, const char **Argv) {
   std::vector<std::string> Files = Parsed->getSourcePathList();
 
   vc::Options Opt;
-  Opt.Root = Root;
+  if (!Root.empty()) {
+    // Absolute, so `--root .` strips the checkout's path from what clang
+    // reports (which is always absolute).
+    llvm::SmallString<256> R(Root);
+    llvm::sys::fs::make_absolute(R);
+    llvm::sys::path::remove_dots(R, true);
+    while (R.size() > 1 && R.ends_with("/"))
+      R.pop_back();
+    Opt.Root = R.str().str();
+  }
+  if (!Weights.empty()) {
+    auto Buf = llvm::MemoryBuffer::getFile(Weights);
+    std::string Error;
+    if (Buf)
+      Opt.W = vc::parseWeights((*Buf)->getBuffer().str(), Error);
+    if (!Buf || !Error.empty()) {
+      llvm::errs() << "vc-cxx-cost: " << Weights << ": "
+                   << (Buf ? Error : Buf.getError().message()) << "\n";
+      return 2;
+    }
+  }
   if (!Models.empty()) {
     auto Buf = llvm::MemoryBuffer::getFile(Models);
     std::string Error;
@@ -160,6 +229,19 @@ int main(int Argc, const char **Argv) {
         });
   }
 
+  llvm::Regex Ignore(Tolerate);
+  if (!Tolerate.empty()) {
+    std::string Error;
+    if (!Ignore.isValid(Error)) {
+      llvm::errs() << "vc-cxx-cost: --tolerate-errors-in: " << Error << "\n";
+      return 2;
+    }
+    // clang stops a translation unit after 19 errors by default.
+    Adjust = combineAdjusters(
+        Adjust, getInsertArgumentAdjuster("-ferror-limit=0",
+                                          ArgumentInsertPosition::END));
+  }
+
   vc::Program Program;
   std::mutex Lock;
   std::vector<std::string> Failed;
@@ -172,6 +254,11 @@ int main(int Argc, const char **Argv) {
         vc::Program Local;
         ClangTool Tool(Db, {File});
         Tool.appendArgumentsAdjuster(Adjust);
+        std::unique_ptr<Tolerant> Quiet;
+        if (!Tolerate.empty()) {
+          Quiet = std::make_unique<Tolerant>(Ignore);
+          Tool.setDiagnosticConsumer(Quiet.get());
+        }
         Factory F(Opt, Local);
         int Rc = Tool.run(&F);
         std::lock_guard<std::mutex> G(Lock);
@@ -191,7 +278,7 @@ int main(int Argc, const char **Argv) {
 
   std::string Error;
   std::vector<std::string> Patterns(Entries.begin(), Entries.end());
-  std::vector<vc::Entry> Result = Program.resolve(Patterns, Error);
+  std::vector<vc::Entry> Result = Program.resolve(Patterns, Error, Breakdown);
   if (!Error.empty()) {
     llvm::errs() << "vc-cxx-cost: " << Error << "\n";
     return 2;

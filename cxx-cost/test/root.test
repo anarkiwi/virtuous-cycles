@@ -1,0 +1,8 @@
+# A relative --root is made absolute, so paths in the ledger are relative to it.
+RUN: rm -rf %t && mkdir -p %t/sub
+RUN: echo 'int f(int n) { while (n) --n; return n; }' > %t/sub/loop.cc
+RUN: cd %t && %cost --root . --entry f sub/loop.cc -- -std=c++20 | FileCheck %s
+CHECK: "file": "sub/loop.cc"
+# A root that only shares a name prefix with the file's directory is not a root.
+RUN: cd %t && %cost --root %t/su --entry f sub/loop.cc -- -std=c++20 | FileCheck --check-prefix=PREFIX %s
+PREFIX: "file": "{{/.*}}/sub/loop.cc"
