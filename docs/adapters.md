@@ -104,3 +104,35 @@ roots = ["ns::Detector::detect", "ns::SceneBoxer::cut"]
 The unknown count is an ordinary key, so the same budget ratchets it: select
 only `infer-cost:unknown` in a metric to hold just the count of unbounded
 procedures.
+
+## `cxx-cost`
+
+Reads the report of [`vc-cxx-cost`](cxx-cost.md) (version 1; any other is an
+error). Keys per entry `E`:
+
+- `E:cost`: the polynomial's value. The unbounded symbol `?` is `inf`;
+  `log2(X)` is `max(0, log2(X))`.
+- `E:unbounded`: the number of ledger entries.
+- `E:degree:S`: the degree in each symbol `S` of the polynomial, `?` and
+  `log2(...)` symbols included.
+
+| option    | default          | meaning |
+|-----------|------------------|---------|
+| `report`  | `cxx-cost.json`  | report path |
+| `symbols` | `{}`             | symbol values; override the report's |
+| `default` | none             | value of a symbol with neither; without it such a symbol is an error |
+| `values`  | all              | subset of `["cost", "unbounded", "degree"]` |
+| `entries` | `["*"]`          | `fnmatch` globs over entry names |
+
+Only symbols in a term being evaluated need a value.
+
+```toml
+[[metric]]
+name = "host-cost"
+adapter = "cxx-cost"
+budget = "budgets/host-cost.json"
+[metric.options]
+report = ".work/cxx-cost.json"
+[metric.limits]
+"ns::Detector::detect:degree:kMaxBoxes" = 1   # fails at degree 2
+"*:degree:k*" = 2

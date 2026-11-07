@@ -193,3 +193,37 @@ def test_merge_driver_conflicts(tmp_path):
     theirs.write_text(budget.dumps({"k": 0, "j": 1}, "lower"))
     assert main(["merge-driver", str(base), str(ours), str(theirs), "x.json"]) == 0
     assert budget.load(ours, "lower") == {"k": 0, "j": 1}
+
+
+def test_limits_fail_check_within_budget(project, capsys):
+    run("tighten")
+    with open(project / "virtuous-cycles.toml", "a", encoding="utf-8") as f:
+        f.write('[metric.limits]\n"*" = 50\n"a" = 85\n')
+    with open(project / "virtuous-cycles.toml", encoding="utf-8") as f:
+        text = f.read()
+    (project / "virtuous-cycles.toml").write_text(
+        text.replace(
+            'path = "cost.*"\n',
+            'path = "cost.*"\n[metric.limits]\n"f*" = 3\n"f2" = 9\n',
+        )
+    )
+    capsys.readouterr()
+    assert run("check") == 1
+    out = capsys.readouterr().out.splitlines()
+    assert sorted(out) == [
+        "cost: f2: 4 over limit 3",
+        "cov: a: 80 over limit 85",
+    ]
+    assert run("report", "--json") == 0
+    status = {
+        (r["metric"], r["key"]): r["status"]
+        for r in json.loads(capsys.readouterr().out)
+    }
+    assert status == {
+        ("cost", "f1"): "ok",
+        ("cost", "f2"): "over",
+        ("cost", "g"): "ok",
+        ("cov", "a"): "over",
+    }
+    put(project, {"f1": 2, "f2": 3, "g": 1}, {"a": 85})
+    assert run("check") == 0

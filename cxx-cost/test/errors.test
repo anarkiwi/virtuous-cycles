@@ -1,0 +1,17 @@
+# An entry matching nothing, a source that does not compile, and a bad models
+# file are errors (exit 2).
+RUN: not %cost --entry 'nothing' %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=ENTRY %s
+ENTRY: entry nothing matches no analysed function
+RUN: echo 'int f() { return g(); }' > %t.cc
+RUN: not %cost --entry 'f' %t.cc %flags 2>&1 | FileCheck --check-prefix=COMPILE %s
+COMPILE: did not compile
+RUN: echo '[{"match": "x"}]' > %t.json
+RUN: not %cost --models %t.json --entry loops %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=MODELS %s
+MODELS: each entry needs "match" and a "cost"
+RUN: echo '{' > %t.bad
+RUN: not %cost --models %t.bad --entry loops %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=JSON %s
+JSON: vc-cxx-cost: {{.*}}.bad:
+RUN: not %cost --models %t.missing --entry loops %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=MISSING %s
+MISSING: No such file
+RUN: not %cost --entry '[' %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=GLOB %s
+GLOB: bad entry pattern

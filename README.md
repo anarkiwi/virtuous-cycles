@@ -3,6 +3,7 @@
 Hold numeric code metrics to committed budgets that can only get stricter: a
 ratchet, like [imbue-ai/ratchets](https://github.com/imbue-ai/ratchets) for lint
 counts, but for any per-key number (Infer cost degree, coverage, sizes, ...).
+Metrics may also carry hard limits.
 
 ## Install
 
@@ -42,7 +43,10 @@ echo 'budgets/*.json merge=virtuous-cycles' >> .gitattributes
 ## Docs
 
 - [docs/usage.md](docs/usage.md): configuration, commands, budget files, merging, CI.
-- [docs/adapters.md](docs/adapters.md): `infer-cost`, `json`, `command`, and writing an adapter.
+- [docs/adapters.md](docs/adapters.md): `infer-cost`, `json`, `command`, `cxx-cost`, and writing an adapter.
+- [docs/cxx-cost.md](docs/cxx-cost.md): `vc-cxx-cost`, a clang tool bounding C++
+  worst-case cost as a polynomial in declared capacities, with a ledger of
+  what it cannot bound.
 - [docs/development.md](docs/development.md): tests and the Infer fixture.
 
 ## License

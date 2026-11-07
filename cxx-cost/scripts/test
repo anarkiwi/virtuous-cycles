@@ -1,0 +1,15 @@
+#!/bin/sh
+# clang-format, the lit fixtures under an instrumented TOOL, and a line
+# coverage gate. Run from cxx-cost/.
+set -eu
+tool=$(realpath "${1:?usage: scripts/test INSTRUMENTED_TOOL}")
+prof=$(mktemp -d)
+clang-format-20 --dry-run --Werror src/*.cc src/*.h include/vc/*.h
+LLVM_PROFILE_FILE="$prof/%p.profraw" python3 /usr/lib/llvm-20/build/utils/lit/lit.py \
+  -sv --param tool="$tool" --param include="$PWD/include" test
+llvm-profdata-20 merge -o "$prof/merged.profdata" "$prof"/*.profraw
+llvm-cov-20 report "$tool" -instr-profile="$prof/merged.profdata" src > "$prof/report.txt"
+[ -z "${COVERAGE_SHOW:-}" ] || llvm-cov-20 show "$tool" -instr-profile="$prof/merged.profdata" src > "$COVERAGE_SHOW"
+cat "$prof/report.txt"
+awk -v min="${COVERAGE_MIN:-85}" '/^TOTAL/ { sub("%", "", $10); pct = $10 + 0 }
+  END { if (pct < min) { printf "line coverage %.2f%% < %d%%\n", pct, min; exit 1 } }' "$prof/report.txt"

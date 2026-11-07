@@ -1,0 +1,17 @@
+# The cost report under virtuous-cycles: budgets recorded from the code as it
+# is pass; a change that adds a nested loop over the capacity breaks both the
+# budget and the degree limit, and one that adds an unbounded loop breaks the
+# budget on the ledger and the cost.
+RUN: mkdir -p %t && cp %S/Inputs/ratchet.toml %t/virtuous-cycles.toml
+RUN: echo '{"direction": "lower", "budgets": {}}' > %t/budget.json
+RUN: %cost --entry scale %S/Inputs/scale.cc %flags > %t/cost.json
+RUN: cd %t && virtuous-cycles -q tighten && virtuous-cycles -q check
+RUN: %cost --entry scale %S/Inputs/scale.cc %flags -DQUADRATIC > %t/cost.json
+RUN: cd %t && not virtuous-cycles -q check | FileCheck --check-prefix=QUAD %s
+QUAD: cost: scale:cost: {{[0-9]+}} worse than budget {{[0-9]+}}
+QUAD: cost: scale:degree:kMax: 2 over limit 1
+RUN: %cost --entry scale %S/Inputs/scale.cc %flags -DUNBOUNDED > %t/cost.json
+RUN: cd %t && not virtuous-cycles -q check | FileCheck --check-prefix=UNB %s
+UNB: cost: scale:cost: inf worse than budget {{[0-9]+}}
+UNB: cost: scale:degree:?: 1 has no budget
+UNB: cost: scale:unbounded: 1 worse than budget 0

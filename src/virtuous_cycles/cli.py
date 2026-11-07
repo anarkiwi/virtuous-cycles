@@ -29,6 +29,8 @@ def rows(metric, values, budgets):
         v, b = values.get(k), budgets.get(k)
         if v is None:
             status = "gone"
+        elif metric.over(k, v):
+            status = "over"
         elif b is None:
             status = "new"
         elif budget.worse(v, b, metric.direction):
@@ -62,7 +64,7 @@ def budget_at(ref, path):
 
 
 def cmd_check(args, metrics):
-    """Fail on values worse than budget, unbudgeted keys, or loosened budgets."""
+    """Fail on values over limit or budget, unbudgeted keys, or loosened budgets."""
     failures, values = [], measure(metrics, args.quiet)
     for m in metrics:
         current = budget.load(m.budget, m.direction)
@@ -80,7 +82,11 @@ def cmd_check(args, metrics):
                         f"{budget.fmt(now)} since {args.against}"
                     )
         for k, v, b, status in rows(m, values[m.name], current):
-            if status == "worse":
+            if status == "over":
+                failures.append(
+                    f"{m.name}: {k}: {budget.fmt(v)} over limit {budget.fmt(m.limit(k))}"
+                )
+            elif status == "worse":
                 failures.append(
                     f"{m.name}: {k}: {budget.fmt(v)} worse than budget {budget.fmt(b)}"
                 )

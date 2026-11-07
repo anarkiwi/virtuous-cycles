@@ -1,0 +1,5 @@
+[
+ {"directory": "DIR", "file": "DIR/a.cc", "arguments": ["clang++", "-std=c++20", "-DBOGUS", "-c", "DIR/a.cc", "-o", "a.o"]},
+ {"directory": "DIR", "file": "DIR/b.cc", "arguments": ["clang++", "-std=c++20", "-c", "DIR/b.cc", "-o", "b.o"]},
+ {"directory": "DIR", "file": "DIR/c.cc", "arguments": ["clang++", "-c", "DIR/c.cc"]}
+]

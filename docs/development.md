@@ -29,3 +29,15 @@ two checkout roots, `/src/a` and `/ci/runner_work/b`.
 `tests/infer/probe/` holds further Infer v1.3.0 reports on small sources
 (`shapes*.cc`), produced in the C locale (ASCII operators), covering ⊤,
 nested loops, `min`/`max` bounds and member-path symbols.
+
+## vc-cxx-cost
+
+```sh
+docker build --target cxx-test -t vc-cxx-cost:test . && docker run --rm vc-cxx-cost:test
+```
+
+The `cxx-test` stage builds `cxx-cost/` with clang's source-based coverage and
+installs this package; its command runs `cxx-cost/scripts/test`: clang-format
+(LLVM style), the lit fixtures in `cxx-cost/test`, and a line-coverage gate
+(`COVERAGE_MIN`, default 85). To iterate against a checkout, mount it and pass
+a coverage build: `scripts/test BUILD/vc-cxx-cost`.

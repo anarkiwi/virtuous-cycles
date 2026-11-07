@@ -1,0 +1,8 @@
+[[metric]]
+name = "cost"
+adapter = "cxx-cost"
+budget = "budget.json"
+[metric.options]
+report = "cost.json"
+[metric.limits]
+"scale:degree:kMax" = 1

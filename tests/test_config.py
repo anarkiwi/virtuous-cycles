@@ -52,3 +52,28 @@ def test_full_entry(tmp_path):
 def test_invalid(tmp_path, text, match):
     with pytest.raises(ValueError, match=match):
         config.load(write(tmp_path, text))
+
+
+def test_limits_strictest_matching_glob(tmp_path):
+    m = load_one(
+        tmp_path,
+        ONE + '[metric.limits]\n"*:degree:*" = 2\n"a:degree:k" = 0\n"b:*" = 3.5\n',
+    )
+    assert m.limits == {"*:degree:*": 2, "a:degree:k": 0, "b:*": 3.5}
+    assert m.limit("a:degree:k") == 0
+    assert m.limit("b:degree:k") == 2
+    assert m.limit("b:cost") == 3.5
+    assert m.limit("c:cost") is None
+    assert (m.over("a:degree:k", 1), m.over("a:degree:k", 0)) == (True, False)
+    assert not m.over("c:cost", 1e9)
+    up = config.Metric("n", "json", "b", direction="higher", limits={"*": 5, "a": 7})
+    assert (up.limit("a"), up.over("a", 6), up.over("b", 6)) == (7, True, False)
+
+
+@pytest.mark.parametrize(
+    "limits",
+    ["limits = 3\n", '[metric.limits]\n"*" = "2"\n', '[metric.limits]\n"*" = true\n'],
+)
+def test_invalid_limits(tmp_path, limits):
+    with pytest.raises(ValueError, match="limits"):
+        config.load(write(tmp_path, ONE + limits))
