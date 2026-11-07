@@ -40,3 +40,26 @@ jobs:
           target: check
           cache-from: type=gha,scope=infer
           cache-to: type=gha,mode=max,scope=infer
+
+  cxx-cost:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          target: cxx-test
+          load: true
+          tags: vc-cxx-cost:test
+          cache-from: type=gha,scope=cxx
+          cache-to: type=gha,mode=max,scope=cxx
+      - run: docker run --rm vc-cxx-cost:test
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          target: cxx-runtime
+          load: true
+          tags: vc-cxx-cost:latest
+          cache-from: type=gha,scope=cxx
+      - run: docker run --rm vc-cxx-cost:latest --help
