@@ -1,0 +1,24 @@
+# --tolerate-errors-in: compile errors in files matching the regex are printed
+# but are not a failure; errors anywhere else still are.
+RUN: echo '#include "rejected.h"' > %t.cc
+RUN: echo 'int f() { return fine(); }' >> %t.cc
+RUN: not %cost --entry f %t.cc -- -std=c++20 -I%S/Inputs 2>&1 | FileCheck --check-prefix=FAIL %s
+FAIL: third-party header
+FAIL: did not compile
+RUN: %cost --entry f --tolerate-errors-in 'rejected\.h$' %t.cc -- -std=c++20 -I%S/Inputs 2>&1 | FileCheck --check-prefix=TOLERATED %s
+TOLERATED: third-party header
+TOLERATED-NOT: did not compile
+TOLERATED: "polynomial": "{{[0-9]+}}"
+RUN: echo 'int g() { return nope(); }' > %t.other.cc
+RUN: not %cost --entry g --tolerate-errors-in 'rejected\.h$' %t.other.cc -- -std=c++20 2>&1 | FileCheck --check-prefix=OTHER %s
+OTHER: did not compile
+RUN: not %cost --entry f --tolerate-errors-in '(' %t.cc -- -std=c++20 2>&1 | FileCheck --check-prefix=REGEX %s
+REGEX: --tolerate-errors-in
+# What clang could not resolve costs `?` and is in the ledger: tolerating an
+# error never hides cost.
+RUN: echo '#include "rejected.h"' > %t.use.cc
+RUN: echo 'int h() { return broken(); }' >> %t.use.cc
+RUN: %cost --entry h --tolerate-errors-in 'rejected\.h$' %t.use.cc -- -std=c++20 -I%S/Inputs 2>/dev/null | FileCheck --check-prefix=LEDGER %s
+LEDGER: "polynomial": "{{.*}}?{{.*}}"
+LEDGER: "kind": "error"
+LEDGER: "reason": "expression with compile errors"

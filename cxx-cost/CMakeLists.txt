@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
-project(vc-cxx-cost CXX)
+# C is enabled because LLVM's CMake config probes libffi and libedit with C
+# compiles; without it a configure outside the Docker image fails.
+project(vc-cxx-cost C CXX)
 
 find_package(Clang REQUIRED CONFIG)
 if(NOT LLVM_VERSION_MAJOR EQUAL 20)

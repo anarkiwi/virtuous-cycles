@@ -124,3 +124,24 @@ def test_bad_version(cxx, version):
 def test_bad_values(cxx):
     with pytest.raises(ValueError, match="values"):
         cxx(values=["cost", "bogus"])
+
+
+def test_breakdown_and_error_ledger_are_accepted(cxx):
+    """``--breakdown`` adds a key and a tolerated error is a ledger kind; the
+    adapter ignores the first and counts the second as unbounded."""
+    report = json.loads(json.dumps(REPORT))
+    for entry in report["entries"].values():
+        entry["breakdown"] = [{"function": "f", "polynomial": "1"}]
+        entry["ledger"].append(
+            {
+                "kind": "error",
+                "function": "f",
+                "file": "a.cc",
+                "line": 1,
+                "column": 1,
+                "reason": "expression with compile errors",
+            }
+        )
+    plain = cxx(values=["unbounded"])
+    marked = cxx(report, values=["unbounded"])
+    assert marked == {k: v + 1 for k, v in plain.items()}

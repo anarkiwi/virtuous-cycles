@@ -18,6 +18,14 @@
 
 /// Before a loop: its trip count, e.g. `VC_BOUND(kMaxBoxes * 2) for (...)`.
 #define VC_BOUND(...) VC_ANNOTATE("vc::bound", __VA_ARGS__)
+/// Before a loop inside another: the trip count summed over every iteration of
+/// the loops around it in the same function (not per iteration), e.g. the
+/// notes of all channels when every channel draws on one shared pool.
+#define VC_TOTAL(...) VC_ANNOTATE("vc::total", __VA_ARGS__)
+/// Before a statement: one operation plus the cost of the most expensive of the
+/// named functions (globs over qualified names). For a call through a function
+/// pointer, `VC_TARGETS(ns::a, ns::b)` names what it can reach.
+#define VC_TARGETS(...) VC_ANNOTATE("vc::targets", __VA_ARGS__)
 /// Before a statement or a function declaration: its whole cost.
 #define VC_COST(...) VC_ANNOTATE("vc::cost", __VA_ARGS__)
 /// On a variable, field, parameter or function: an upper bound of its value

@@ -15,3 +15,16 @@ RUN: not %cost --models %t.missing --entry loops %S/constant.cc %flags 2>&1 | Fi
 MISSING: No such file
 RUN: not %cost --entry '[' %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=GLOB %s
 GLOB: bad entry pattern
+RUN: echo '{"statement": -1}' > %t.weights
+RUN: not %cost --weights %t.weights --entry loops %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=WEIGHTS %s
+WEIGHTS: weights: "statement" is not statement, condition or call, or its value is not a non-negative number
+RUN: echo '{"speed": 1}' > %t.weights2
+RUN: not %cost --weights %t.weights2 --entry loops %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=WEIGHTS2 %s
+WEIGHTS2: weights: "speed"
+RUN: echo '[' > %t.weights3
+RUN: not %cost --weights %t.weights3 --entry loops %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=WEIGHTS3 %s
+WEIGHTS3: .weights3:
+RUN: not %cost --weights %t.weights4 --entry loops %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=MISSING %s
+RUN: echo '3' > %t.weights5
+RUN: not %cost --weights %t.weights5 --entry loops %S/constant.cc %flags 2>&1 | FileCheck --check-prefix=WEIGHTS5 %s
+WEIGHTS5: weights: expected a JSON object

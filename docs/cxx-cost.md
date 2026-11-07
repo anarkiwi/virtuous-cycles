@@ -13,6 +13,21 @@ docker run --rm -v "$PWD:$PWD" -w "$PWD" vc-cxx-cost \
   -p build --files '/lib/dsp/' --entry 'ns::Detector::detect' -o cxx-cost.json
 ```
 
+Each release publishes that image as `ghcr.io/anarkiwi/virtuous-cycles/cxx-cost:<tag>`,
+so CI need not build it. In GitHub Actions, `uses: anarkiwi/virtuous-cycles/cxx-cost@<tag>`
+pulls it and puts a `vc-cxx-cost` command on `PATH`:
+
+```yaml
+- uses: anarkiwi/virtuous-cycles/cxx-cost@v0.4.0
+- run: vc-cxx-cost -p build --entry 'ns::Detector::detect' -o cxx-cost.json
+```
+
+To build without Docker, on Ubuntu 24.04: `apt install clang-20 libclang-20-dev
+llvm-20-dev libclang-common-20-dev libclang-rt-20-dev libstdc++-14-dev cmake
+ninja-build`, then `CC=clang-20 CXX=clang++-20 cmake -S cxx-cost -B build -G Ninja
+-DCMAKE_PREFIX_PATH=/usr/lib/llvm-20 && cmake --build build`, and copy
+`vc-cxx-cost` to `/usr/lib/llvm-20/bin` (where it finds clang's builtin headers).
+
 The binary links Ubuntu 24.04's clang 20. To run it in another Ubuntu 24.04
 image (one that has the project's headers), copy
 `/usr/lib/llvm-20/bin/vc-cxx-cost` from the `cxx-runtime` stage and install
@@ -27,7 +42,10 @@ image (one that has the project's headers), copy
 | `--drop-arg REGEX` | remove matching compiler arguments (flags clang rejects) |
 | `--extra-arg ARG` | add a compiler argument |
 | `--models FILE` | system-function models tried before the built-in ones (below) |
-| `--root DIR` | report paths relative to `DIR` |
+| `--root DIR` | report paths relative to `DIR` (a relative `DIR`, such as `.`, is made absolute first) |
+| `--weights FILE` | what each kind of operation costs (below) |
+| `--tolerate-errors-in REGEX` | compile errors in files matching `REGEX` are printed but do not fail the run (below) |
+| `--breakdown` | list the cost of every function an entry reaches |
 | `-o FILE` | report path (default stdout) |
 | `-j N` | translation units in parallel (default: all cores) |
 
@@ -43,7 +61,10 @@ callee's cost. Costs are polynomials with non-negative coefficients in
 symbols that are non-negative:
 
 - sequence: sum; `if`/`?:`: coefficient-wise maximum of the branches (an
-  upper bound of the larger); `switch`: sum of its cases;
+  upper bound of the larger); `switch`: the most expensive path, which is from
+  each case label to the first statement that cannot fall through (`break`,
+  `continue`, `return`, `goto`, `throw`), so a case that falls through adds its
+  successor;
 - loop: trip count × (condition + body + increment) + one final condition;
 - call: the callee's cost, composed through the call graph across all
   translation units;
@@ -51,6 +72,13 @@ symbols that are non-negative:
 
 Implicit and defaulted member functions cost 1; implicit destructors are not
 counted.
+
+`--weights FILE` takes `{"statement": X, "condition": Y, "call": Z}` (any subset;
+the rest stay 1) and gives each kind its own cost: `statement` is an expression,
+declaration or return, `condition` an `if`, loop or `switch` test and a loop
+step, `call` a function entered and a modelled library call. Use it to turn
+operation counts into something nearer time on a target, for instance a larger
+`call` for a core without a hardware divider.
 
 ### Trip counts
 
@@ -68,8 +96,25 @@ In order of preference:
    capacity), `std::array<T, N>`, a C array, an initializer list, or a
    declaration annotated `VC_SIZE`.
 
+4. A pointer or iterator walked from the start of an array or container to its
+   end, once per element, with the variable not written in the body:
+   `for (T *p = a; p < a + N; ++p)` runs `N` times, and `for (auto i = c.begin();
+   i != c.end(); ++i)` runs as many times as `c` has capacity (`vc::Capped`,
+   `std::array`, a C array, or `VC_SIZE` on the container). A body that steps
+   the iterator itself (`erase(i--)`) is not counted.
+
 Anything else (`while`, `do`, a loop on a value with no bound) costs `?`
-iterations and is in the ledger.
+iterations and is in the ledger. `VC_TOTAL(expr)` on a loop bounds its trip
+count summed over every iteration of the loops around it in the same function,
+for work that all of them share:
+
+```cpp
+for (Channel &C : Channels)                 // 9 channels
+  VC_TOTAL(kNotes) for (Note *N : C.notes)  // all channels draw on kNotes notes
+    N->tick();
+```
+
+costs `kNotes` ticks, not `9 * kNotes`.
 
 A limit's bound comes from: integer constants; namespace or class constants
 (a *symbol* named after the variable, or `VC_SYMBOL(name)`), whose value is
@@ -88,7 +133,7 @@ number.
 | `VC_COST(expr)` on any declaration | `expr` |
 | virtual, not devirtualisable | join of every overrider in the analysed units (a pure method contributes none); none: `?` and a `virtual` ledger entry |
 | a declaration with no body | `?`, `external` |
-| a pointer, member pointer or `std::function` | `?`, `indirect` |
+| a pointer, member pointer or `std::function` | `?`, `indirect`, unless the statement has `VC_TARGETS` |
 | a system-header function | its model |
 
 Recursion is a cycle in the resolved call graph. Unannotated it costs `?` ×
@@ -135,6 +180,8 @@ other compiler.
 | macro | on | meaning |
 |---|---|---|
 | `VC_BOUND(expr)` | a loop | its trip count |
+| `VC_TOTAL(expr)` | a loop | its trip count summed over the loops around it |
+| `VC_TARGETS(a, b)` | a statement | one operation plus the costliest of the named functions (globs over qualified names, as for `--entry`) |
 | `VC_COST(expr)` | a statement or function declaration | its whole cost |
 | `VC_SIZE(expr)` | a variable, field, parameter or function | upper bound of the value (integer) or size (container) |
 | `VC_RECURSION(expr)` | a function in a recursive cycle | activations of the cycle per call |
@@ -173,8 +220,22 @@ false and counts the drop in `dropped()`.
 `symbols` lists the symbols the polynomials use and their values where every
 translation unit agrees on one (`null` otherwise). `log2(s)` symbols take their
 value from `s`. Ledger kinds: `loop`, `recursion`, `virtual`, `external`,
-`indirect`, `library` (a modelled call on a range with no bound),
-`annotation`. The ledger of an entry is that of every function it reaches.
+`indirect`, `library` (a modelled call on a range with no bound), `annotation`,
+`error` (an expression or function with compile errors, below). The ledger of
+an entry is that of every function it reaches. With `--breakdown` each entry
+also has `"breakdown"`: the cost of every function it reaches,
+`[{"function": ..., "polynomial": ...}]`, sorted by name.
+
+### Errors in third-party headers
+
+By default a translation unit with any compile error fails the run.
+`--tolerate-errors-in REGEX` prints errors in files matching `REGEX` but does not
+count them, and lifts clang's 19-error limit. Tolerating an error never hides
+cost: an expression clang could not resolve costs `?` and a function declared
+with errors adds `?`, each with a ledger entry of kind `error`. It helps when a
+vendored header fails in code the analysed sources do not use; code that does
+depend on a rejected declaration stays unbounded, and is better fixed by
+patching or stubbing the header.
 
 ## Tests
 

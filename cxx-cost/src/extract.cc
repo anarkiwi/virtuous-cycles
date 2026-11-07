@@ -133,11 +133,14 @@ private:
                                 SourceLocation L);
   std::optional<Poly> parsed(const std::string &Text, SourceLocation L);
 
-  CostRef stmt(const Stmt *S, std::optional<Poly> Bound = std::nullopt);
+  CostRef stmt(const Stmt *S, std::optional<Poly> Bound = std::nullopt,
+               std::optional<Poly> Total = std::nullopt);
+  CostRef switchBody(const Stmt *Body);
   CostRef expr(const Stmt *S);
   CostRef loop(const Stmt *S, std::optional<Poly> Bound,
                std::optional<Poly> Inferred, const std::string &Why,
-               CostRef Once, CostRef Each);
+               CostRef Once, CostRef Each,
+               std::optional<Poly> Total = std::nullopt);
   CostRef call(const FunctionDecl *FD, const Expr *Site, const Expr *Object,
                llvm::ArrayRef<const Expr *> Args);
   CostRef callable(llvm::ArrayRef<const Expr *> Args);
@@ -148,6 +151,8 @@ private:
   std::optional<Poly> capacity(QualType T);
   std::optional<Poly> amount(const Expr *E);
   std::optional<Poly> trip(const ForStmt *F);
+  std::optional<Poly> walk(const ForStmt *F);
+  CostRef op(double W) const { return Cost::leaf(Poly::constant(W)); }
   std::optional<Poly> symbolOf(const VarDecl *VD);
 
   ASTContext &Ctx;
@@ -166,16 +171,27 @@ Site Extractor::site(SourceLocation L) const {
   llvm::SmallString<256> Path(P.getFilename());
   llvm::sys::path::remove_dots(Path, true);
   llvm::StringRef R(Path);
-  if (!Opt.Root.empty() && R.consume_front(Opt.Root))
+  if (!Opt.Root.empty() && R.starts_with(Opt.Root) &&
+      (R.size() == Opt.Root.size() || R[Opt.Root.size()] == '/')) {
+    R = R.drop_front(Opt.Root.size());
     R.consume_front("/");
+  }
   return {R.str(), P.getLine(), P.getColumn()};
 }
 
 std::string Extractor::source(const Stmt *S) const {
   if (!S)
     return "``";
-  llvm::StringRef Text = Lexer::getSourceText(
-      SM.getExpansionRange(S->getSourceRange()), SM, Ctx.getLangOpts());
+  // Written in a macro's body, show the body's tokens, not the invocation.
+  CharSourceRange Range = SM.getExpansionRange(S->getSourceRange());
+  SourceLocation B = S->getBeginLoc(), E = S->getEndLoc();
+  if (B.isMacroID() && E.isMacroID()) {
+    SourceLocation SB = SM.getSpellingLoc(B), SE = SM.getSpellingLoc(E);
+    if (SM.getFileID(SB) == SM.getFileID(SE) &&
+        !SM.isBeforeInTranslationUnit(SE, SB))
+      Range = CharSourceRange::getTokenRange(SB, SE);
+  }
+  llvm::StringRef Text = Lexer::getSourceText(Range, SM, Ctx.getLangOpts());
   std::string Out;
   for (char C : Text)
     if (!std::isspace((unsigned char)C) || (!Out.empty() && Out.back() != ' '))
@@ -277,20 +293,26 @@ void Extractor::function(const FunctionDecl *FD) {
     return;
   }
   F.Recursion = annotated(FD, "vc::recursion", FD->getLocation());
-  CostRef Body = Cost::leaf(Poly::constant(1));
+  CostRef Body = op(Opt.W.Call);
   if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(FD))
     for (const CXXCtorInitializer *I : Ctor->inits())
       if (I->isWritten())
-        Body = Cost::sum(
-            Body, Cost::sum(Cost::leaf(Poly::constant(1)), expr(I->getInit())));
+        Body =
+            Cost::sum(Body, Cost::sum(op(Opt.W.Statement), expr(I->getInit())));
   F.Body = Cost::sum(Body, stmt(FD->getBody()));
+  if (FD->isInvalidDecl())
+    F.Body =
+        Cost::sum(F.Body, unbounded("error", "function with compile errors",
+                                    FD->getLocation()));
   if (F.Loops)
     F.Body = Cost::scale(Poly::symbol(Unbounded), F.Body);
 }
 
 CostRef Extractor::loop(const Stmt *S, std::optional<Poly> Bound,
                         std::optional<Poly> Inferred, const std::string &Why,
-                        CostRef Once, CostRef Each) {
+                        CostRef Once, CostRef Each, std::optional<Poly> Total) {
+  if (Total)
+    return Cost::sum(Once, Cost::hoist(Cost::scale(*Total, Each)));
   Poly T;
   if (Bound)
     T = *Bound;
@@ -301,8 +323,84 @@ CostRef Extractor::loop(const Stmt *S, std::optional<Poly> Bound,
   return Cost::sum(Once, Cost::scale(T, Each));
 }
 
-CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound) {
-  auto One = [] { return Cost::leaf(Poly::constant(1)); };
+/// `a, b, c` split at the commas outside brackets, trimmed.
+static std::vector<std::string> names(const std::string &Text) {
+  std::vector<std::string> Out;
+  std::string Cur;
+  int Depth = 0;
+  auto Flush = [&] {
+    llvm::StringRef T = llvm::StringRef(Cur).trim();
+    if (!T.empty())
+      Out.push_back(T.str());
+    Cur.clear();
+  };
+  for (char C : Text) {
+    if (C == '<' || C == '(' || C == '[')
+      ++Depth;
+    else if (C == '>' || C == ')' || C == ']')
+      --Depth;
+    if (C == ',' && Depth == 0)
+      Flush();
+    else
+      Cur += C;
+  }
+  Flush();
+  return Out;
+}
+
+/// True if control cannot fall out of the end of `S` into what follows it.
+static bool leaves(const Stmt *S) {
+  while (S) {
+    if (const auto *C = dyn_cast<SwitchCase>(S))
+      S = C->getSubStmt();
+    else if (const auto *L = dyn_cast<LabelStmt>(S))
+      S = L->getSubStmt();
+    else if (const auto *A = dyn_cast<AttributedStmt>(S))
+      S = A->getSubStmt();
+    else if (const auto *B = dyn_cast<CompoundStmt>(S))
+      S = B->body_empty() ? nullptr : B->body_back();
+    else
+      break;
+  }
+  return S &&
+         isa<BreakStmt, ContinueStmt, ReturnStmt, GotoStmt, CXXThrowExpr>(S);
+}
+
+/// A switch body costs its most expensive path: from each case label, the
+/// statements up to the first one that cannot fall through (break, continue,
+/// return, goto, throw), so a case that does fall through adds its successor.
+CostRef Extractor::switchBody(const Stmt *Body) {
+  const auto *C = dyn_cast_or_null<CompoundStmt>(Body);
+  if (!C)
+    return stmt(Body);
+  CostRef Before = Cost::leaf({});
+  std::vector<CostRef> Groups;
+  std::vector<bool> Ends;
+  for (const Stmt *K : C->body()) {
+    if (isa<SwitchCase>(K)) {
+      Groups.push_back(Cost::leaf({}));
+      Ends.push_back(false);
+    }
+    CostRef Part = stmt(K);
+    if (Groups.empty()) {
+      Before = Cost::sum(Before, Part);
+      continue;
+    }
+    Groups.back() = Cost::sum(Groups.back(), Part);
+    Ends.back() = leaves(K);
+  }
+  CostRef Best = Cost::leaf({}), Path = Cost::leaf({});
+  for (size_t I = Groups.size(); I-- > 0;) {
+    Path = Cost::sum(Groups[I], Ends[I] ? Cost::leaf({}) : Path);
+    Best = Cost::join(Best, Path);
+  }
+  return Cost::sum(Before, Best);
+}
+
+CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound,
+                        std::optional<Poly> Total) {
+  auto One = [this] { return op(Opt.W.Statement); };
+  auto Test = [this] { return op(Opt.W.Condition); };
   auto Plus = [](CostRef A, CostRef B) { return Cost::sum(A, B); };
   if (!S)
     return Cost::leaf({});
@@ -311,14 +409,20 @@ CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound) {
       if (const auto *An = dyn_cast<AnnotateAttr>(At)) {
         if (An->getAnnotation() == "vc::cost")
           return Cost::leaf(*parsed(text(An), S->getBeginLoc()));
+        if (An->getAnnotation() == "vc::targets")
+          return Plus(One(),
+                      Cost::targets(names(text(An)), site(S->getBeginLoc())));
         if (An->getAnnotation() == "vc::bound")
           Bound = parsed(text(An), S->getBeginLoc());
+        if (An->getAnnotation() == "vc::total")
+          Total = parsed(text(An), S->getBeginLoc());
       }
     const Stmt *Sub = A->getSubStmt();
-    if (Bound && !isa<ForStmt, WhileStmt, DoStmt, CXXForRangeStmt>(Sub))
+    if ((Bound || Total) &&
+        !isa<ForStmt, WhileStmt, DoStmt, CXXForRangeStmt>(Sub))
       unbounded("annotation", "a bound on something that is not a loop",
                 S->getBeginLoc());
-    return stmt(Sub, Bound);
+    return stmt(Sub, Bound, Total);
   }
   if (const auto *C = dyn_cast<CompoundStmt>(S)) {
     CostRef R = Cost::leaf({});
@@ -327,7 +431,7 @@ CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound) {
     return R;
   }
   if (const auto *I = dyn_cast<IfStmt>(S)) {
-    CostRef Cond = Plus(One(), expr(I->getCond()));
+    CostRef Cond = Plus(Test(), expr(I->getCond()));
     if (const VarDecl *V = I->getConditionVariable())
       Cond = Plus(Cond, expr(V->getInit()));
     return Plus(Plus(stmt(I->getInit()), Cond),
@@ -335,38 +439,41 @@ CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound) {
   }
   if (const auto *F = dyn_cast<ForStmt>(S)) {
     CostRef Cond =
-        F->getCond() ? Plus(One(), expr(F->getCond())) : Cost::leaf({});
-    CostRef Inc = F->getInc() ? Plus(One(), expr(F->getInc())) : Cost::leaf({});
-    std::optional<Poly> T = Bound ? std::nullopt : trip(F);
+        F->getCond() ? Plus(Test(), expr(F->getCond())) : Cost::leaf({});
+    CostRef Inc =
+        F->getInc() ? Plus(Test(), expr(F->getInc())) : Cost::leaf({});
+    std::optional<Poly> T = Bound || Total ? std::nullopt : trip(F);
     return loop(S, Bound, T,
                 "for loop with no bound on " + source(F->getCond()),
                 Plus(stmt(F->getInit()), Cond),
-                Plus(Plus(Cond, stmt(F->getBody())), Inc));
+                Plus(Plus(Cond, stmt(F->getBody())), Inc), Total);
   }
   if (const auto *W = dyn_cast<WhileStmt>(S)) {
-    CostRef Cond = Plus(One(), expr(W->getCond()));
+    CostRef Cond = Plus(Test(), expr(W->getCond()));
     return loop(S, Bound, std::nullopt,
                 "while loop with no bound on " + source(W->getCond()), Cond,
-                Plus(Cond, stmt(W->getBody())));
+                Plus(Cond, stmt(W->getBody())), Total);
   }
   if (const auto *D = dyn_cast<DoStmt>(S))
-    return loop(S, Bound, std::nullopt,
-                "do loop with no bound on " + source(D->getCond()),
-                Cost::leaf({}),
-                Plus(Plus(One(), expr(D->getCond())), stmt(D->getBody())));
+    return loop(
+        S, Bound, std::nullopt,
+        "do loop with no bound on " + source(D->getCond()), Cost::leaf({}),
+        Plus(Plus(Test(), expr(D->getCond())), stmt(D->getBody())), Total);
   if (const auto *R = dyn_cast<CXXForRangeStmt>(S)) {
-    std::optional<Poly> T = Bound ? std::nullopt : size(R->getRangeInit());
+    std::optional<Poly> T =
+        Bound || Total ? std::nullopt : size(R->getRangeInit());
     std::string Why = "range over " + source(R->getRangeInit()) + " (" +
                       R->getRangeInit()->getType().getAsString() +
                       "), which has no capacity";
     return loop(S, Bound, T, Why,
                 Plus(One(), Plus(stmt(R->getInit()), expr(R->getRangeInit()))),
-                Plus(Plus(One(), expr(R->getLoopVariable()->getInit())),
-                     stmt(R->getBody())));
+                Plus(Plus(Test(), expr(R->getLoopVariable()->getInit())),
+                     stmt(R->getBody())),
+                Total);
   }
   if (const auto *Sw = dyn_cast<SwitchStmt>(S))
-    return Plus(Plus(stmt(Sw->getInit()), Plus(One(), expr(Sw->getCond()))),
-                stmt(Sw->getBody()));
+    return Plus(Plus(stmt(Sw->getInit()), Plus(Test(), expr(Sw->getCond()))),
+                switchBody(Sw->getBody()));
   if (const auto *C = dyn_cast<SwitchCase>(S))
     return stmt(C->getSubStmt());
   if (const auto *L = dyn_cast<LabelStmt>(S))
@@ -400,6 +507,11 @@ CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound) {
 CostRef Extractor::expr(const Stmt *S) {
   if (!S || isa<LambdaExpr>(S))
     return Cost::leaf({});
+  // Only reachable when --tolerate-errors-in lets a unit with errors through:
+  // what clang could not resolve has no cost to read, so it has none to hide.
+  if (const auto *E = dyn_cast<Expr>(S); E && E->containsErrors())
+    return unbounded("error", "expression with compile errors",
+                     S->getBeginLoc());
   if (const auto *C = dyn_cast<AbstractConditionalOperator>(S))
     return Cost::sum(expr(C->getCond()), Cost::join(expr(C->getTrueExpr()),
                                                     expr(C->getFalseExpr())));
@@ -445,7 +557,7 @@ CostRef Extractor::target(const FunctionDecl *FD, SourceLocation L) {
   if (auto C = annotated(FD, "vc::cost", L))
     return Cost::leaf(*C);
   if (FD->isDefaulted() || FD->isImplicit())
-    return Cost::leaf(Poly::constant(1));
+    return op(Opt.W.Call);
   return Cost::call(usr(FD), plain(FD), site(L));
 }
 
@@ -476,7 +588,7 @@ CostRef Extractor::callable(llvm::ArrayRef<const Expr *> Args) {
       }
     }
   }
-  return R->zero() ? Cost::leaf(Poly::constant(1)) : R;
+  return R->zero() ? op(Opt.W.Call) : R;
 }
 
 CostRef Extractor::call(const FunctionDecl *FD, const Expr *E,
@@ -493,7 +605,7 @@ CostRef Extractor::call(const FunctionDecl *FD, const Expr *E,
     const auto *Ctor = dyn_cast<CXXConstructorDecl>(FD);
     if ((Method && Method->isMoveAssignmentOperator()) ||
         (Ctor && Ctor->isMoveConstructor()))
-      return Cost::leaf(Poly::constant(1));
+      return op(Opt.W.Call);
     const Model *M = nullptr;
     for (const Model &X : Opt.Models)
       if (Args.size() >= X.MinArgs && X.Match.match(Name)) {
@@ -504,7 +616,7 @@ CostRef Extractor::call(const FunctionDecl *FD, const Expr *E,
       return unbounded("external", "call to " + Name + ", which has no model",
                        L);
     if (M->K == Model::Const)
-      return Cost::leaf(Poly::constant(1));
+      return op(Opt.W.Call);
     if (M->K == Model::Indirect)
       return unbounded("indirect", "call through " + Name, L);
     if (M->K == Model::Opaque)
@@ -520,8 +632,7 @@ CostRef Extractor::call(const FunctionDecl *FD, const Expr *E,
     Poly F = M->K == Model::Linear      ? *N
              : M->K == Model::LinearLog ? *N * N->log2()
                                         : N->log2();
-    return Cost::sum(Cost::leaf(Poly::constant(1)),
-                     Cost::scale(F, callable(Args)));
+    return Cost::sum(op(Opt.W.Call), Cost::scale(F, callable(Args)));
   }
   if (const auto *MD = dyn_cast<CXXMethodDecl>(FD);
       MD && MD->isVirtual() && isa<CXXMemberCallExpr>(E)) {
@@ -798,6 +909,54 @@ std::optional<Poly> Extractor::amount(const Expr *E) {
   return size(X);
 }
 
+/// `E` without the wrappers a copy of a temporary or an array decay adds.
+const Expr *peel(const Expr *E) {
+  for (;;) {
+    E = E->IgnoreParenImpCasts();
+    if (const auto *X = dyn_cast<ExprWithCleanups>(E))
+      E = X->getSubExpr();
+    else if (const auto *M = dyn_cast<MaterializeTemporaryExpr>(E))
+      E = M->getSubExpr();
+    else if (const auto *T = dyn_cast<CXXBindTemporaryExpr>(E))
+      E = T->getSubExpr();
+    else if (const auto *C = dyn_cast<CXXConstructExpr>(E);
+             C && C->getNumArgs() == 1)
+      E = C->getArg(0);
+    else
+      return E;
+  }
+}
+
+/// True if `A` and `B` name the same variable or member of the same object.
+bool sameObject(const Expr *A, const Expr *B) {
+  A = A->IgnoreParenImpCasts();
+  B = B->IgnoreParenImpCasts();
+  const auto *RA = dyn_cast<DeclRefExpr>(A);
+  const auto *RB = dyn_cast<DeclRefExpr>(B);
+  if (RA && RB)
+    return RA->getDecl() == RB->getDecl();
+  const auto *MA = dyn_cast<MemberExpr>(A);
+  const auto *MB = dyn_cast<MemberExpr>(B);
+  if (MA && MB)
+    return MA->getMemberDecl() == MB->getMemberDecl() &&
+           sameObject(MA->getBase(), MB->getBase());
+  return isa<CXXThisExpr>(A) && isa<CXXThisExpr>(B);
+}
+
+/// `X` in `X.begin()`, `X.cbegin()`, `std::begin(X)` (or the `end` forms).
+const Expr *rangeOf(const Expr *E, bool End) {
+  const auto *CE = dyn_cast<CallExpr>(peel(E));
+  const FunctionDecl *FD = CE ? CE->getDirectCallee() : nullptr;
+  if (!FD)
+    return nullptr;
+  llvm::StringRef N = FD->getName();
+  if (N != (End ? "end" : "begin") && N != (End ? "cend" : "cbegin"))
+    return nullptr;
+  if (const auto *M = dyn_cast<CXXMemberCallExpr>(CE))
+    return M->getImplicitObjectArgument();
+  return CE->getNumArgs() == 1 ? CE->getArg(0) : nullptr;
+}
+
 /// True if `S` writes to or takes the address of `V`.
 bool writes(const Stmt *S, const VarDecl *V) {
   if (!S)
@@ -813,13 +972,97 @@ bool writes(const Stmt *S, const VarDecl *V) {
     if ((U->isIncrementDecrementOp() || U->getOpcode() == UO_AddrOf) &&
         Is(U->getSubExpr()))
       return true;
+  if (const auto *O = dyn_cast<CXXOperatorCallExpr>(S))
+    switch (O->getOperator()) {
+    case OO_PlusPlus:
+    case OO_MinusMinus:
+    case OO_PlusEqual:
+    case OO_MinusEqual:
+    case OO_Equal:
+      if (O->getNumArgs() && Is(O->getArg(0)))
+        return true;
+      break;
+    default:
+      break;
+    }
   for (const Stmt *K : S->children())
     if (writes(K, V))
       return true;
   return false;
 }
 
+/// A loop that steps a pointer or iterator once per element from the start of
+/// an array or container to its end: the trip count is the container's size.
+///   for (T *p = a; p < a + N; ++p)         N elements
+///   for (auto i = c.begin(); i != c.end(); ++i)   c's size
+std::optional<Poly> Extractor::walk(const ForStmt *F) {
+  if (!F->getCond() || !F->getInc())
+    return std::nullopt;
+  const Expr *Inc = peel(F->getInc()), *Step = nullptr;
+  if (const auto *U = dyn_cast<UnaryOperator>(Inc); U && U->isIncrementOp())
+    Step = U->getSubExpr();
+  else if (const auto *O = dyn_cast<CXXOperatorCallExpr>(Inc);
+           O && O->getOperator() == OO_PlusPlus && O->getNumArgs() == 1)
+    Step = O->getArg(0);
+  if (!Step)
+    return std::nullopt;
+  auto VarOf = [](const Expr *E) -> const VarDecl * {
+    const auto *R = dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts());
+    return R ? dyn_cast<VarDecl>(R->getDecl()) : nullptr;
+  };
+  const VarDecl *V = VarOf(Step);
+  if (!V)
+    return std::nullopt;
+  const Expr *Init = nullptr;
+  if (const auto *D = dyn_cast_or_null<DeclStmt>(F->getInit())) {
+    for (const Decl *X : D->decls())
+      if (X == V)
+        Init = V->getInit();
+  } else if (const auto *B = dyn_cast_or_null<BinaryOperator>(F->getInit())) {
+    if (B->getOpcode() == BO_Assign && VarOf(B->getLHS()) == V)
+      Init = B->getRHS();
+  }
+  if (!Init)
+    return std::nullopt;
+  bool Pointer = V->getType()->isPointerType();
+  const Expr *C = peel(F->getCond()), *Limit = nullptr;
+  if (const auto *B = dyn_cast<BinaryOperator>(C);
+      Pointer && B && (B->getOpcode() == BO_LT || B->getOpcode() == BO_NE) &&
+      VarOf(B->getLHS()) == V)
+    Limit = B->getRHS();
+  else if (const auto *O = dyn_cast<CXXOperatorCallExpr>(C);
+           !Pointer && O && O->getOperator() == OO_ExclaimEqual &&
+           O->getNumArgs() == 2 && VarOf(O->getArg(0)) == V)
+    Limit = O->getArg(1);
+  else if (const auto *RW = dyn_cast<CXXRewrittenBinaryOperator>(C);
+           !Pointer && RW) {
+    // C++20 rewrites `a != b` as `!(a == b)`.
+    auto D = RW->getDecomposedForm();
+    if (D.Opcode == BO_NE && VarOf(D.LHS) == V)
+      Limit = D.RHS;
+  }
+  if (!Limit || writes(F->getBody(), V))
+    return std::nullopt;
+  if (Pointer) {
+    const auto *Add = dyn_cast<BinaryOperator>(peel(Limit));
+    if (!Add || Add->getOpcode() != BO_Add)
+      return std::nullopt;
+    const Expr *Base = Add->getLHS(), *N = Add->getRHS();
+    if (!N->getType()->isIntegerType())
+      std::swap(Base, N);
+    if (!N->getType()->isIntegerType() || !sameObject(peel(Init), Base))
+      return std::nullopt;
+    return bound(N);
+  }
+  const Expr *Lo = rangeOf(Init, false), *Hi = rangeOf(Limit, true);
+  if (!Lo || !Hi || !sameObject(Lo, Hi))
+    return std::nullopt;
+  return size(Lo);
+}
+
 std::optional<Poly> Extractor::trip(const ForStmt *F) {
+  if (auto W = walk(F))
+    return W;
   const auto *Cond = dyn_cast_or_null<BinaryOperator>(
       F->getCond() ? F->getCond()->IgnoreParenImpCasts() : nullptr);
   if (!Cond || !Cond->isComparisonOp())
@@ -1032,6 +1275,35 @@ std::vector<Model> parseModels(const std::string &Json, std::string &Error) {
     Out.push_back(std::move(*M));
   }
   return Out;
+}
+
+Weights parseWeights(const std::string &Json, std::string &Error) {
+  auto V = llvm::json::parse(Json);
+  if (!V) {
+    Error = toString(V.takeError());
+    return {};
+  }
+  const auto *O = V->getAsObject();
+  if (!O) {
+    Error = "weights: expected a JSON object";
+    return {};
+  }
+  Weights W;
+  for (const auto &[K, X] : *O) {
+    auto N = X.getAsNumber();
+    double *Slot = K == "statement"   ? &W.Statement
+                   : K == "condition" ? &W.Condition
+                   : K == "call"      ? &W.Call
+                                      : nullptr;
+    if (!Slot || !N || *N < 0) {
+      Error = "weights: \"" + K.str() +
+              "\" is not statement, condition or call, or its value is not a "
+              "non-negative number";
+      return {};
+    }
+    *Slot = *N;
+  }
+  return W;
 }
 
 void extract(ASTContext &Ctx, const Options &Opt, Program &Out) {

@@ -43,10 +43,21 @@ std::vector<Model> builtinModels();
 /// Parse `[{"match": GLOB, "cost": KIND, "arg": N}]`; `Error` on failure.
 std::vector<Model> parseModels(const std::string &Json, std::string &Error);
 
+/// What one operation costs, by kind (the default is 1 for each).
+struct Weights {
+  double Statement = 1; ///< an expression, declaration or return
+  double Condition = 1; ///< an if/loop/switch test, a loop step
+  double Call = 1;      ///< a function entered, a modelled call's overhead
+};
+
 struct Options {
+  Weights W;
   std::string Root;
   std::vector<Model> Models;
 };
+
+/// Parse `{"statement": X, "condition": Y, "call": Z}`; `Error` on failure.
+Weights parseWeights(const std::string &Json, std::string &Error);
 
 void extract(clang::ASTContext &Ctx, const Options &Opt, Program &Out);
 

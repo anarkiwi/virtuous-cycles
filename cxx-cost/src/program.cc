@@ -60,6 +60,23 @@ CostRef Cost::call(std::string Usr, std::string Callee, Site At, bool Virtual,
   return C;
 }
 
+CostRef Cost::hoist(CostRef E) {
+  if (E->zero())
+    return E;
+  auto C = std::make_shared<Cost>();
+  C->K = Hoist;
+  C->Kids = {E};
+  return C;
+}
+
+CostRef Cost::targets(std::vector<std::string> Names, Site At) {
+  auto C = std::make_shared<Cost>();
+  C->K = Targets;
+  C->Names = std::move(Names);
+  C->At = std::move(At);
+  return C;
+}
+
 void Program::symbol(const std::string &Name, std::optional<double> Value) {
   auto [It, New] = Symbols.emplace(Name, Value);
   if (New || !Value || It->second == Value || Conflicts.count(Name))
@@ -81,6 +98,22 @@ void Program::merge(Program &&O) {
 }
 
 std::vector<std::string> Program::candidates(const Cost &C) const {
+  if (C.K == Cost::Targets) {
+    std::vector<std::string> Out;
+    for (const std::string &Pat : C.Names) {
+      auto Glob = llvm::GlobPattern::create(Pat, 4096);
+      if (!Glob) {
+        llvm::consumeError(Glob.takeError());
+        continue;
+      }
+      for (const auto &[U, F] : Functions)
+        if (Glob->match(F.Name) || Glob->match(F.Plain))
+          Out.push_back(U);
+    }
+    std::sort(Out.begin(), Out.end());
+    Out.erase(std::unique(Out.begin(), Out.end()), Out.end());
+    return Out;
+  }
   if (!C.Virtual)
     return {C.Usr};
   std::vector<std::string> Out;
@@ -103,38 +136,65 @@ std::vector<std::string> Program::candidates(const Cost &C) const {
 }
 
 void Program::edges(const Cost &C, std::set<std::string> &Out) const {
-  if (C.K == Cost::Call)
+  if (C.K == Cost::Call || C.K == Cost::Targets)
     for (const std::string &U : candidates(C))
       Out.insert(U);
   for (const CostRef &K : C.Kids)
     edges(*K, Out);
 }
 
-Poly Program::eval(const Cost &C, const std::set<std::string> &Scc,
-                   std::vector<LedgerEntry> &Ledger, const std::string &Owner) {
+Program::Parts Program::eval(const Cost &C, const std::set<std::string> &Scc,
+                             std::vector<LedgerEntry> &Ledger,
+                             const std::string &Owner) {
   switch (C.K) {
   case Cost::Leaf:
-    return C.P;
-  case Cost::Scale:
-    return C.P * eval(*C.Kids[0], Scc, Ledger, Owner);
-  case Cost::Sum:
-  case Cost::Join: {
-    Poly R;
+    return {C.P, {}};
+  case Cost::Scale: {
+    Parts V = eval(*C.Kids[0], Scc, Ledger, Owner);
+    return {C.P * V.Scaled, V.Hoisted};
+  }
+  case Cost::Hoist: {
+    Parts V = eval(*C.Kids[0], Scc, Ledger, Owner);
+    return {{}, V.Scaled + V.Hoisted};
+  }
+  case Cost::Sum: {
+    Parts R;
     for (const CostRef &K : C.Kids) {
-      Poly V = eval(*K, Scc, Ledger, Owner);
-      R = C.K == Cost::Sum ? R + V : R.join(V);
+      Parts V = eval(*K, Scc, Ledger, Owner);
+      R.Scaled = R.Scaled + V.Scaled;
+      R.Hoisted = R.Hoisted + V.Hoisted;
     }
     return R;
   }
+  case Cost::Join: {
+    // The larger branch is not known to be the same one for both parts, so
+    // a join keeps its whole cost under the loops around it.
+    Poly R;
+    for (const CostRef &K : C.Kids) {
+      Parts V = eval(*K, Scc, Ledger, Owner);
+      R = R.join(V.Scaled + V.Hoisted);
+    }
+    return {R, {}};
+  }
   case Cost::Call:
+  case Cost::Targets:
     break;
   }
   auto Cands = candidates(C);
   if (Cands.empty()) {
-    Ledger.push_back({"virtual", Owner,
-                      "virtual call to " + C.Callee + " has no overrider",
-                      C.At});
-    return Poly::symbol(Unbounded);
+    if (C.K == Cost::Targets) {
+      std::string Names;
+      for (const std::string &N : C.Names)
+        Names += (Names.empty() ? "" : ", ") + N;
+      Ledger.push_back({"annotation", Owner,
+                        "VC_TARGETS names no analysed function: " + Names,
+                        C.At});
+    } else {
+      Ledger.push_back({"virtual", Owner,
+                        "virtual call to " + C.Callee + " has no overrider",
+                        C.At});
+    }
+    return {Poly::symbol(Unbounded), {}};
   }
   Poly R;
   for (const std::string &U : Cands) {
@@ -150,11 +210,11 @@ Poly Program::eval(const Cost &C, const std::set<std::string> &Scc,
                       C.At});
     R = R.join(Poly::symbol(Unbounded));
   }
-  return R;
+  return {R, {}};
 }
 
 std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
-                                    std::string &Error) {
+                                    std::string &Error, bool Breakdown) {
   std::map<std::string, std::set<std::string>> Graph;
   for (const auto &[U, F] : Functions)
     edges(*F.Body, Graph[U]);
@@ -194,7 +254,8 @@ std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
     std::optional<Poly> Bound;
     for (const std::string &M : Scc) {
       Function &F = Functions[M];
-      Poly P = eval(*F.Body, Scc, F.Ledger, F.Name);
+      Parts Split = eval(*F.Body, Scc, F.Ledger, F.Name);
+      Poly P = Split.Scaled + Split.Hoisted;
       if (!Cyclic) {
         Resolved[M] = P;
         return;
@@ -225,7 +286,7 @@ std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
       Error = "bad entry pattern " + Pat + ": " + toString(Glob.takeError());
       return {};
     }
-    Entry E{Pat, {}, {}, {}};
+    Entry E{Pat, {}, {}, {}, {}};
     std::vector<std::string> Work;
     for (const auto &[U, F] : Functions)
       if (Glob->match(F.Name) || Glob->match(F.Plain)) {
@@ -249,6 +310,16 @@ std::vector<Entry> Program::resolve(const std::vector<std::string> &Patterns,
         if (Functions.count(V) && Seen.insert(V).second)
           Work.push_back(V);
     }
+    if (Breakdown)
+      for (const std::string &U : Seen)
+        if (Functions.count(U))
+          E.Breakdown.emplace_back(Functions[U].Name,
+                                   Resolved[U].name(Symbols));
+    std::sort(E.Breakdown.begin(), E.Breakdown.end(),
+              [](const auto &A, const auto &B) {
+                return A.first != B.first ? A.first < B.first
+                                          : A.second.str() < B.second.str();
+              });
     std::sort(E.Functions.begin(), E.Functions.end());
     std::sort(E.Ledger.begin(), E.Ledger.end(),
               [](const LedgerEntry &A, const LedgerEntry &B) {
@@ -313,6 +384,14 @@ void writeJson(std::ostream &OS, const Program &P,
             for (const std::string &S : Syms)
               J.attribute(S, E.Cost.degree(S));
           });
+          if (!E.Breakdown.empty())
+            J.attributeArray("breakdown", [&] {
+              for (const auto &[N, C] : E.Breakdown)
+                J.object([&] {
+                  J.attribute("function", N);
+                  J.attribute("polynomial", C.str());
+                });
+            });
           J.attributeArray("ledger", [&] {
             for (const LedgerEntry &L : E.Ledger)
               J.object([&] {

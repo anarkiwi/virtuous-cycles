@@ -4,7 +4,7 @@
 // RUN: %cost --entry 'forms' --entry 'build' --entry 'annotated' --entry \
 // RUN:   'pick' --entry 'Ring::Ring' %s %flags | FileCheck %s
 // CHECK-LABEL: "forms":
-// CHECK: "polynomial": "22*?"
+// CHECK: "polynomial": "21*?"
 // CHECK: "reason": "backward goto"
 // CHECK-LABEL: "build":
 // CHECK: "polynomial": "3*kSlots + 9"

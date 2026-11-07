@@ -1,0 +1,13 @@
+# --breakdown lists the cost of every function an entry reaches.
+RUN: %cost --entry 'loops' %S/constant.cc %flags | FileCheck --check-prefix=OFF %s
+OFF-NOT: "breakdown"
+RUN: %cost --breakdown --entry 'stepped' --entry 'outer' %S/Inputs/breakdown.cc %flags | FileCheck %s
+CHECK-LABEL: "stepped":
+CHECK: "breakdown": [
+CHECK: "function": "stepped"
+CHECK-LABEL: "outer":
+CHECK: "breakdown": [
+CHECK: "function": "inner"
+CHECK-NEXT: "polynomial": "3*kN + 5"
+CHECK: "function": "outer"
+CHECK-NEXT: "polynomial": "3*kN + 9"

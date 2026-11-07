@@ -1,0 +1,26 @@
+name: vc-cxx-cost
+description: Put the vc-cxx-cost command (clang 20 C++ worst-case cost analysis) on PATH, from the released image
+inputs:
+  version:
+    description: Release tag of virtuous-cycles whose image to use
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Pull the released image
+      shell: bash
+      env:
+        IMAGE: ghcr.io/anarkiwi/virtuous-cycles/cxx-cost:${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        docker pull "$IMAGE"
+        bin="$RUNNER_TEMP/vc-cxx-cost-bin"
+        mkdir -p "$bin"
+        # The image reads sources and a compilation database by the same absolute
+        # paths the host has, so mount the workspace and temp dir at their own paths.
+        cat > "$bin/vc-cxx-cost" <<SCRIPT
+        #!/bin/sh
+        exec docker run --rm -v "\$PWD:\$PWD" -v "$RUNNER_TEMP:$RUNNER_TEMP" -w "\$PWD" "$IMAGE" "\$@"
+        SCRIPT
+        chmod +x "$bin/vc-cxx-cost"
+        echo "$bin" >> "$GITHUB_PATH"
