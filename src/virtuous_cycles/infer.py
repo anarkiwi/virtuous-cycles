@@ -2,7 +2,9 @@
 
 import json
 import math
+import os
 import re
+import subprocess
 
 from tqdm import tqdm
 
@@ -21,6 +23,12 @@ TOKEN = re.compile(
 )
 CALL = re.compile(r"(log|min|max)\(")
 OPERAND_END = " \t,)⋅×^" + SUPERSCRIPTS
+ANON = re.compile(r"(?P<head>anonymous_namespace_)(?P<path>[^:]+)")
+LAMBDA = re.compile(r"(?P<site>lambda_[^:<>(),]+:\d+)_[0-9a-f]{8}\b")
+HASHED = re.compile(r"<[0-9a-f]{12,16}>")
+LOCATED = re.compile(r"\([a-z_]+_at_[^()]*\)")
+COLLAPSED = "\0"
+ENCLOSING = re.compile(rf"<[^<>]*{COLLAPSED}[^<>]*>")
 
 
 class Polynomial:
@@ -159,6 +167,64 @@ class Polynomial:
         return float(self.default)
 
 
+def mangled(path):
+    """``path`` as Infer spells it in a name: ``/`` and space become ``_``."""
+    return str(path).translate(str.maketrans("/ ", "__"))
+
+
+def git_toplevel():
+    """The enclosing git work tree of the working directory, else the directory."""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return os.getcwd()
+
+
+class Canonical:
+    """Procedure names that do not depend on where the source was checked out.
+
+    Infer's clang frontend writes an anonymous namespace as
+    ``anonymous_namespace_<path>`` with the presumed file path, a lambda as
+    ``lambda_<file>:<line>_<crc32 of its full path>``, and a function template's
+    argument list longer than 40 characters as ``<fnv64 hex>``; a list naming a
+    lambda or unnamed type spells that type's absolute path, so its length, and
+    whether it is hashed, depend on the checkout. The anonymous namespace path is
+    made relative to ``root`` or, failing that, to the longest report source file
+    it ends in; the lambda's crc is dropped; an argument list that is hashed or
+    names a source location becomes ``<>``, so every such instantiation of a
+    template shares one key.
+    """
+
+    def __init__(self, root, files):
+        self.root = mangled(str(root).rstrip("/")) + "_"
+        self.files = sorted(
+            {mangled(f) for f in files if f and not f.startswith("/")},
+            key=len,
+            reverse=True,
+        )
+
+    def path(self, match):
+        """One ``anonymous_namespace_<path>`` relative to the source root."""
+        path = match["path"]
+        if path.startswith(self.root):
+            path = path[len(self.root) :]
+        elif path.startswith("_"):
+            path = next((f for f in self.files if path.endswith("_" + f)), path)
+        return match["head"] + path
+
+    def __call__(self, name):
+        name = LAMBDA.sub(r"\g<site>", ANON.sub(self.path, name))
+        name = LOCATED.sub(COLLAPSED, HASHED.sub(COLLAPSED, name))
+        while (folded := ENCLOSING.sub(COLLAPSED, name)) != name:
+            name = folded
+        return name.replace(COLLAPSED, "<>")
+
+
 def cost_value(cost, options):
     """One procedure's cost: ``inf`` for ⊤, else its degree or polynomial."""
     degree = cost["hum"]["hum_degree"]
@@ -177,8 +243,9 @@ def cost_value(cost, options):
 def infer_cost(options):
     """Per-procedure cost from Infer's ``costs-report.json``.
 
-    Keys come from the ``key`` template; procedures sharing a key keep the
-    worst value. See docs/adapters.md for the options.
+    Keys come from the ``key`` template, made independent of the checkout
+    path by :class:`Canonical`; procedures sharing a key keep the worst
+    value. See docs/adapters.md for the options.
     """
     if options.get("value", "degree") not in ("degree", "polynomial"):
         raise ValueError(
@@ -188,6 +255,10 @@ def infer_cost(options):
         options.get("report", "infer-out/costs-report.json"), encoding="utf-8"
     ) as f:
         entries = json.load(f)
+    canonical = Canonical(
+        os.path.abspath(options.get("source_root") or git_toplevel()),
+        {e.get("loc", {}).get("file") for e in entries},
+    )
     if "callgraph" in options:
         with open(options["callgraph"], encoding="utf-8") as f:
             keep = callgraph.reached(callgraph.parse(f), options["roots"])
@@ -199,7 +270,7 @@ def infer_cost(options):
     for entry in tqdm(
         entries, desc="infer-cost", unit="proc", disable=None, leave=False
     ):
-        key = template.format(**entry, **entry.get("loc", {}))
+        key = canonical(template.format(**entry, **entry.get("loc", {})))
         out[key] = max(cost_value(entry[field], options), out.get(key, -math.inf))
     unknown = sum(math.isinf(v) for v in out.values())
     out[options.get("unknown_key", "infer-cost:unknown")] = float(unknown)

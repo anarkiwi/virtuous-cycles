@@ -1,12 +1,13 @@
 import json
 import math
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from virtuous_cycles import get_adapter
 from virtuous_cycles.cli import main
-from virtuous_cycles.infer import Polynomial
+from virtuous_cycles.infer import Canonical, Polynomial
 
 REPORT = Path(__file__).parent / "infer" / "costs-report.json"
 INF = math.inf
@@ -29,7 +30,7 @@ def test_degree_from_real_report():
         "compare": 1.0,
         "Pair<int,long>::operator()": 1.0,
         "Pair<int,long>::operator<": 0.0,
-        "lambda_example.cpp:88_264f29e8::operator()": 0.0,
+        "lambda_example.cpp:88::operator()": 0.0,
         "infer-cost:unknown": 1.0,
     }
 
@@ -154,7 +155,7 @@ PROCS = Path(__file__).parent / "infer" / "procs.txt"
                 "compare",
                 "Pair<int,long>::operator()",
                 "Pair<int,long>::operator<",
-                "lambda_example.cpp:88_264f29e8::operator()",
+                "lambda_example.cpp:88::operator()",
             },
         ),
         (
@@ -189,3 +190,87 @@ def test_probe_c_locale_polynomials():
     )
     assert got["outer_const_inner_stride"] == 10250 + 12288 * 6
     assert got["infer-cost:unknown"] == sum(map(math.isinf, got.values()))
+
+
+ANON = Path(__file__).parent / "infer" / "anon"
+CHECKOUTS = {"a": "/src/a", "b": "/ci/runner_work/b"}
+CANONICAL = {
+    "lambda_anon.cpp:49::operator()": 0.0,
+    "lambda_anon.cpp:50::operator()": 1.0,
+    "lambda_anon.cpp:54::operator()": 0.0,
+    "lib::anonymous_namespace_lib_anon.cpp::scan": 1.0,
+    "lib::each<>": INF,
+    "lib::entry": INF,
+    "lib::spill": INF,
+    "lib::walk<char>": 0.0,
+    "lib::walk<int>": 1.0,
+    "lib::walk<lib::Wide>": INF,
+    "infer-cost:unknown": 4.0,
+}
+
+
+def anon(tag, **options):
+    return get_adapter("infer-cost")(
+        {"report": str(ANON / f"costs-report-{tag}.json"), **options}
+    )
+
+
+@pytest.mark.parametrize("tag", sorted(CHECKOUTS))
+def test_same_source_same_keys_from_any_checkout(tag):
+    assert anon(tag, source_root=CHECKOUTS[tag]) == CANONICAL
+    assert anon(tag, source_root="/elsewhere") == CANONICAL
+    assert anon(tag) == CANONICAL
+
+
+@pytest.mark.parametrize("tag", sorted(CHECKOUTS))
+def test_reachability_runs_on_raw_names(tag):
+    got = anon(tag, callgraph=str(ANON / f"procs-{tag}.txt"), roots=["lib::entry"])
+    assert set(got) == {
+        "lambda_anon.cpp:49::operator()",
+        "lambda_anon.cpp:50::operator()",
+        "lib::anonymous_namespace_lib_anon.cpp::scan",
+        "lib::each<>",
+        "lib::entry",
+        "lib::walk<char>",
+        "lib::walk<int>",
+        "infer-cost:unknown",
+    }
+
+
+def test_default_root_is_the_git_toplevel(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "sub").mkdir()
+    (tmp_path / "plain").mkdir()
+    monkeypatch.chdir(repo / "sub")
+    ns = f"anonymous_namespace_{str(repo).replace('/', '_')}_gen_x.cc::f"
+    report = tmp_path / "costs-report.json"
+    hum = {"hum_polynomial": "n", "hum_degree": "1", "big_o": "O(n)"}
+    report.write_text(
+        json.dumps([{"procedure_id": ns, "exec_cost": {"degree": 100, "hum": hum}}])
+    )
+    got = get_adapter("infer-cost")({"report": str(report)})
+    assert got == {"anonymous_namespace_gen_x.cc::f": 1.0, "infer-cost:unknown": 0.0}
+    monkeypatch.chdir(tmp_path / "plain")
+    got = get_adapter("infer-cost")({"report": str(report)})
+    assert ns in got
+
+
+@pytest.mark.parametrize(
+    "name,key",
+    [
+        ("ns::f<abcdef0123456789>", "ns::f<>"),
+        ("ns::f<1>", "ns::f<1>"),
+        ("ns::f<20480000>", "ns::f<20480000>"),
+        ("V<X<(lambda_at__r_a.cc:3:4)>,int>::push", "V<>::push"),
+        ("V<X<0123456789abcd>>::push", "V<>::push"),
+        ("f<(unnamed_struct_at__r_a.cc:1:2)>", "f<>"),
+        ("Pair<int,long>::operator<", "Pair<int,long>::operator<"),
+        ("anonymous_namespace__r_x_y.cc::g", "anonymous_namespace_x_y.cc::g"),
+        ("anonymous_namespace_rel_y.cc::g", "anonymous_namespace_rel_y.cc::g"),
+        ("anonymous_namespace__usr_y.h::g", "anonymous_namespace__usr_y.h::g"),
+        ("lambda_a.cc:7_0badf00d::operator()", "lambda_a.cc:7::operator()"),
+    ],
+)
+def test_canonical_names(name, key):
+    assert Canonical("/r", [])(name) == key
