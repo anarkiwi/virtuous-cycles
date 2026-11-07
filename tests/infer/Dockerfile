@@ -20,13 +20,30 @@ COPY example.cpp .
 RUN infer --cost-only -o infer-out -- g++ -c example.cpp \
     && infer debug -o infer-out --procedures --procedures-name --procedures-callees --select all > procs.txt \
     && cp infer-out/costs-report.json .
+# anon.cpp from two checkout roots: the same source, two absolute paths.
+COPY anon.cpp /src/a/lib/anon.cpp
+COPY anon.cpp /ci/runner_work/b/lib/anon.cpp
+RUN mkdir anon \
+    && for root in /src/a /ci/runner_work/b; do \
+         tag="$(basename "${root}")"; \
+         (cd "${root}" && infer --cost-only -o infer-out -- g++ -std=c++17 -c "${root}/lib/anon.cpp" \
+           && infer debug -o infer-out --procedures --procedures-name --procedures-callees --select all \
+             > "/work/anon/procs-${tag}.txt" \
+           && cp infer-out/costs-report.json "/work/anon/costs-report-${tag}.json"); \
+       done
 
 FROM scratch AS fixture
 COPY --from=report /work/costs-report.json /work/procs.txt /
+COPY --from=report /work/anon /anon
 
 FROM toolchain AS check
 COPY --from=report /work/costs-report.json /work/procs.txt /fresh/
+COPY --from=report /work/anon /fresh/anon
 COPY costs-report.json procs.txt /committed/
+COPY anon /committed/anon
 RUN norm='map({procedure_id, procedure_name, loc: .loc.file, degree: .exec_cost.degree, hum: .exec_cost.hum}) | sort_by(.procedure_id, .hum.hum_polynomial)' \
-    && diff <(jq -S "$norm" /committed/costs-report.json) <(jq -S "$norm" /fresh/costs-report.json) \
-    && diff /committed/procs.txt /fresh/procs.txt
+    && for r in costs-report.json anon/costs-report-a.json anon/costs-report-b.json; do \
+         diff <(jq -S "$norm" "/committed/${r}") <(jq -S "$norm" "/fresh/${r}"); \
+       done \
+    && diff /committed/procs.txt /fresh/procs.txt \
+    && diff -r /committed/anon --exclude='*.json' /fresh/anon

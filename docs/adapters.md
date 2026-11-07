@@ -33,6 +33,7 @@ Reads [Infer](https://fbinfer.com/docs/checker-cost)'s `costs-report.json`
 | `key`         | `{procedure_id}`               | `str.format` template over the entry (`procedure_id`, `procedure_name`, `hash`) and its `loc` (`file`, `lnum`) |
 | `cost`        | `exec_cost`                    | cost field to read |
 | `unknown_key` | `infer-cost:unknown`           | key holding the number of keys whose cost is ⊤ (`inf`) |
+| `source_root` | git toplevel of the config's directory, else that directory | checkout root that anonymous-namespace paths are made relative to (see below) |
 | `callgraph`   | none                           | output of `infer debug --procedures --procedures-name --procedures-callees --select all`; keeps only procedures reached from `roots` |
 | `roots`       | required with `callgraph`      | entry-point procedure globs (`fnmatch`, case-sensitive), e.g. `["ns::Detector::detect"]`; one that matches nothing is an error |
 
@@ -44,6 +45,17 @@ Reads [Infer](https://fbinfer.com/docs/checker-cost)'s `costs-report.json`
   (`.`, `x`, `^`) output parse.
 - An unbounded cost (Infer's ⊤, `hum_degree` `Top`) is `inf`; unreachable code
   is `0`.
+- Keys do not depend on the checkout path. Infer names an anonymous namespace
+  `anonymous_namespace_<path>` with the compiler's path (`/` as `_`); that path
+  is made relative to `source_root`, or else to the longest report source
+  file (`loc.file`) it ends in, so `/home/ci/repo/lib/a.cc` and
+  `/scratch/me/repo/lib/a.cc` both give `anonymous_namespace_lib_a.cc`. A
+  lambda `lambda_<file>:<line>_<crc>` drops its path-derived crc. A function
+  template argument list over 40 characters is printed as a hash `<9f2c…>`,
+  and one naming a lambda or unnamed type spells its absolute path, so both
+  become `<>` (enclosing lists too): every such instantiation of a template
+  shares one key, holding the worst cost (⊤ dominates). Lists Infer prints in
+  full without a source location (`walk<int>`) keep their own keys.
 - Infer's `procedure_id` does not carry C++ parameter types, so overloads share
   a key; the key keeps the worst of them. Add `{file}` to the template to
   separate same-named procedures across files.

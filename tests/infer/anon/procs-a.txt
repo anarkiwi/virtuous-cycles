@@ -1,0 +1,114 @@
+class lambda_anon.cpp:49_cf48a092::lambda_anon.cpp:49_10f9eb6f(10389984566209820399)
+  source_file: lib/anon.cpp
+  proc_name: class lambda_anon.cpp:49_cf48a092::lambda_anon.cpp:49_10f9eb6f(10389984566209820399)
+  defined: false
+  callees: 
+  
+class lambda_anon.cpp:49_cf48a092::operator()(14960270774260082382)
+  source_file: lib/anon.cpp
+  proc_name: class lambda_anon.cpp:49_cf48a092::operator()(14960270774260082382)
+  defined: true
+  callees: 
+  
+class lambda_anon.cpp:50_5b514d9c::lambda_anon.cpp:50_667a0a9c(11098021230548089456)
+  source_file: lib/anon.cpp
+  proc_name: class lambda_anon.cpp:50_5b514d9c::lambda_anon.cpp:50_667a0a9c(11098021230548089456)
+  defined: false
+  callees: 
+  
+class lambda_anon.cpp:50_5b514d9c::operator()(5569620272022731917)
+  source_file: lib/anon.cpp
+  proc_name: class lambda_anon.cpp:50_5b514d9c::operator()(5569620272022731917)
+  defined: true
+  callees: lib::anonymous_namespace__src_a_lib_anon.cpp::scan
+  
+class lambda_anon.cpp:54_d2a36d60::__invoke(8019370006169748098)
+  source_file: lib/anon.cpp
+  proc_name: class lambda_anon.cpp:54_d2a36d60::__invoke(8019370006169748098)
+  defined: false
+  callees: 
+  
+class lambda_anon.cpp:54_d2a36d60::lambda_anon.cpp:54_ccad3403(9964559484215754467)
+  source_file: lib/anon.cpp
+  proc_name: class lambda_anon.cpp:54_d2a36d60::lambda_anon.cpp:54_ccad3403(9964559484215754467)
+  defined: false
+  callees: 
+  
+class lambda_anon.cpp:54_d2a36d60::operator()(18025036006034899610)
+  source_file: lib/anon.cpp
+  proc_name: class lambda_anon.cpp:54_d2a36d60::operator()(18025036006034899610)
+  defined: true
+  callees: opaque
+  
+class lambda_anon.cpp:54_d2a36d60::operator_int_(*)(unsigned_long)(7497304535722051618)
+  source_file: lib/anon.cpp
+  proc_name: class lambda_anon.cpp:54_d2a36d60::operator_int_(*)(unsigned_long)(7497304535722051618)
+  defined: false
+  callees: 
+  
+class lib::anonymous_namespace__src_a_lib_anon.cpp::Wide::~Wide(6095053036349870599)
+  source_file: lib/anon.cpp
+  proc_name: class lib::anonymous_namespace__src_a_lib_anon.cpp::Wide::~Wide(6095053036349870599)
+  defined: false
+  callees: 
+  
+lib::anonymous_namespace__src_a_lib_anon.cpp::scan{14918692328591835680}
+  source_file: lib/anon.cpp
+  proc_name: lib::anonymous_namespace__src_a_lib_anon.cpp::scan{14918692328591835680}
+  defined: true
+  callees: 
+  
+lib::each<(lambda_at__src_a_lib_anon.cpp:49:18)>{16518562578987070161}
+  source_file: lib/anon.cpp
+  proc_name: lib::each<(lambda_at__src_a_lib_anon.cpp:49:18)>{16518562578987070161}
+  defined: true
+  callees: lambda_anon.cpp:49_cf48a092::operator()
+  
+lib::each<(lambda_at__src_a_lib_anon.cpp:50:18)>{6745863061910889638}
+  source_file: lib/anon.cpp
+  proc_name: lib::each<(lambda_at__src_a_lib_anon.cpp:50:18)>{6745863061910889638}
+  defined: true
+  callees: lambda_anon.cpp:50_5b514d9c::operator()
+  
+lib::each<(lambda_at__src_a_lib_anon.cpp:54:18)>{964193705035294221}
+  source_file: lib/anon.cpp
+  proc_name: lib::each<(lambda_at__src_a_lib_anon.cpp:54:18)>{964193705035294221}
+  defined: true
+  callees: lambda_anon.cpp:54_d2a36d60::operator()
+  
+lib::entry{8398410490424147607}
+  source_file: lib/anon.cpp
+  proc_name: lib::entry{8398410490424147607}
+  defined: true
+  callees: lib::each<(lambda_at__src_a_lib_anon.cpp:49:18)>, lib::each<(lambda_at__src_a_lib_anon.cpp:50:18)>, lib::anonymous_namespace__src_a_lib_anon.cpp::scan, lib::walk<char>, lib::walk<int>
+  
+lib::spill{4110283188216841419}
+  source_file: lib/anon.cpp
+  proc_name: lib::spill{4110283188216841419}
+  defined: true
+  callees: lib::each<(lambda_at__src_a_lib_anon.cpp:54:18)>, lib::walk<lib::Wide>
+  
+lib::walk<char>{14284172805988654475}
+  source_file: lib/anon.cpp
+  proc_name: lib::walk<char>{14284172805988654475}
+  defined: true
+  callees: 
+  
+lib::walk<int>{1542439875222806129}
+  source_file: lib/anon.cpp
+  proc_name: lib::walk<int>{1542439875222806129}
+  defined: true
+  callees: 
+  
+lib::walk<lib::Wide>{5339970947719071537}
+  source_file: lib/anon.cpp
+  proc_name: lib::walk<lib::Wide>{5339970947719071537}
+  defined: true
+  callees: opaque
+  
+opaque{6983899002851600556}
+  source_file: lib/anon.cpp
+  proc_name: opaque{6983899002851600556}
+  defined: false
+  callees: 
+  

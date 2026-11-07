@@ -22,6 +22,10 @@ procedures, degrees, polynomials and call graph with the committed files. To reg
 docker build --target fixture --output tests/infer tests/infer
 ```
 
+`tests/infer/anon/` holds reports and call graphs of `tests/infer/anon.cpp`
+(anonymous namespace, lambdas, hashed template instantiations) compiled from
+two checkout roots, `/src/a` and `/ci/runner_work/b`.
+
 `tests/infer/probe/` holds further Infer v1.3.0 reports on small sources
 (`shapes*.cc`), produced in the C locale (ASCII operators), covering ⊤,
 nested loops, `min`/`max` bounds and member-path symbols.
