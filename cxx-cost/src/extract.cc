@@ -133,14 +133,20 @@ private:
                                 SourceLocation L);
   std::optional<Poly> parsed(const std::string &Text, SourceLocation L);
 
+  /// A loop's trip count summed over loops around it: in its function, or
+  /// (`Run`) over the whole run of the entry point.
+  struct Shared {
+    Poly Bound;
+    bool Run;
+  };
   CostRef stmt(const Stmt *S, std::optional<Poly> Bound = std::nullopt,
-               std::optional<Poly> Total = std::nullopt);
+               std::optional<Shared> Total = std::nullopt);
   CostRef switchBody(const Stmt *Body);
   CostRef expr(const Stmt *S);
   CostRef loop(const Stmt *S, std::optional<Poly> Bound,
                std::optional<Poly> Inferred, const std::string &Why,
                CostRef Once, CostRef Each,
-               std::optional<Poly> Total = std::nullopt);
+               std::optional<Shared> Total = std::nullopt);
   CostRef call(const FunctionDecl *FD, const Expr *Site, const Expr *Object,
                llvm::ArrayRef<const Expr *> Args);
   CostRef callable(llvm::ArrayRef<const Expr *> Args);
@@ -310,9 +316,11 @@ void Extractor::function(const FunctionDecl *FD) {
 
 CostRef Extractor::loop(const Stmt *S, std::optional<Poly> Bound,
                         std::optional<Poly> Inferred, const std::string &Why,
-                        CostRef Once, CostRef Each, std::optional<Poly> Total) {
+                        CostRef Once, CostRef Each,
+                        std::optional<Shared> Total) {
   if (Total)
-    return Cost::sum(Once, Cost::hoist(Cost::scale(*Total, Each)));
+    return Cost::sum(Once,
+                     Cost::hoist(Cost::scale(Total->Bound, Each), Total->Run));
   Poly T;
   if (Bound)
     T = *Bound;
@@ -398,7 +406,7 @@ CostRef Extractor::switchBody(const Stmt *Body) {
 }
 
 CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound,
-                        std::optional<Poly> Total) {
+                        std::optional<Shared> Total) {
   auto One = [this] { return op(Opt.W.Statement); };
   auto Test = [this] { return op(Opt.W.Condition); };
   auto Plus = [](CostRef A, CostRef B) { return Cost::sum(A, B); };
@@ -415,7 +423,9 @@ CostRef Extractor::stmt(const Stmt *S, std::optional<Poly> Bound,
         if (An->getAnnotation() == "vc::bound")
           Bound = parsed(text(An), S->getBeginLoc());
         if (An->getAnnotation() == "vc::total")
-          Total = parsed(text(An), S->getBeginLoc());
+          Total = Shared{*parsed(text(An), S->getBeginLoc()), false};
+        if (An->getAnnotation() == "vc::runtotal")
+          Total = Shared{*parsed(text(An), S->getBeginLoc()), true};
       }
     const Stmt *Sub = A->getSubStmt();
     if ((Bound || Total) &&
