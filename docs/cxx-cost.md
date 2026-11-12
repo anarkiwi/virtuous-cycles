@@ -18,7 +18,7 @@ so CI need not build it. In GitHub Actions, `uses: anarkiwi/virtuous-cycles/cxx-
 pulls it and puts a `vc-cxx-cost` command on `PATH`:
 
 ```yaml
-- uses: anarkiwi/virtuous-cycles/cxx-cost@v0.5.0
+- uses: anarkiwi/virtuous-cycles/cxx-cost@v0.6.0
 - run: vc-cxx-cost -p build --entry 'ns::Detector::detect' -o cxx-cost.json
 ```
 
