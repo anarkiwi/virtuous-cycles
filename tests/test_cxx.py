@@ -145,3 +145,13 @@ def test_breakdown_and_error_ledger_are_accepted(cxx):
     plain = cxx(values=["unbounded"])
     marked = cxx(report, values=["unbounded"])
     assert marked == {k: v + 1 for k, v in plain.items()}
+
+
+def test_py_cost_reads_its_default_report(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "py-cost.json").write_text(json.dumps(REPORT))
+    keys = get_adapter("py-cost")({"values": ["degree"], "entries": [SCAN]})
+    assert keys == {f"{SCAN}:degree:?": 1.0, f"{SCAN}:degree:n": 2.0}
+    (tmp_path / "py-cost.json").write_text(json.dumps({**REPORT, "version": 2}))
+    with pytest.raises(ValueError, match="^py-cost: unsupported report version 2"):
+        get_adapter("py-cost")({})

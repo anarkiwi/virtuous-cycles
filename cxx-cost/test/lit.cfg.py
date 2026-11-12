@@ -10,7 +10,8 @@ config.excludes = ["Inputs"]
 config.test_source_root = os.path.dirname(__file__)
 tool = lit_config.params["tool"]
 include = lit_config.params["include"]
-config.substitutions.append(("%cost", tool))
+shim = os.path.join(config.test_source_root, "crosscheck.py")
+config.substitutions.append(("%cost", f"python3 {shim} {tool}"))
 config.substitutions.append(("%flags", f"-- -std=c++20 -I{include}"))
 config.environment["LLVM_PROFILE_FILE"] = os.environ.get(
     "LLVM_PROFILE_FILE", "/dev/null"

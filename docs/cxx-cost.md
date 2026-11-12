@@ -47,6 +47,7 @@ image (one that has the project's headers), copy
 | `--tolerate-errors-in REGEX` | compile errors in files matching `REGEX` are printed but do not fail the run (below) |
 | `--breakdown` | list the cost of every function an entry reaches |
 | `-o FILE` | report path (default stdout) |
+| `--emit-ir FILE` | write the merged per-function summaries before composition (the input `python -m virtuous_cycles.cost.ir` composes); for cross-checking |
 | `-j N` | translation units in parallel (default: all cores) |
 
 Exit status 2 if a translation unit does not compile, an entry matches
@@ -267,4 +268,7 @@ clang-format, then the lit fixtures under `cxx-cost/test` (each FileChecks the
 exact polynomial and ledger of small sources) on a coverage-instrumented build,
 then a line-coverage gate. `ratchet.test` runs the report through
 `virtuous-cycles check`: a nested loop over a capacity fails the budget and a
-degree limit, an unbounded loop fails the ledger and cost budgets.
+degree limit, an unbounded loop fails the ledger and cost budgets. Every
+fixture runs the tool through `test/crosscheck.py`, which also composes its
+`--emit-ir` output with the Python backend and fails on any difference from
+the C++ report.

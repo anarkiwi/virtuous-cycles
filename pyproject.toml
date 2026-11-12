@@ -11,8 +11,12 @@ license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = ["tqdm>=4.66"]
 
+[project.optional-dependencies]
+py-cost = ["mypy>=2.4.1,<2.5"]
+
 [project.scripts]
 virtuous-cycles = "virtuous_cycles.cli:main"
+vc-py-cost = "virtuous_cycles.pycost.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -23,4 +27,5 @@ branch = true
 source = ["virtuous_cycles"]
 
 [tool.pylint.main]
+extension-pkg-allow-list = ["mypy"]
 disable = ["too-few-public-methods", "too-many-arguments", "too-many-positional-arguments"]

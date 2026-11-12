@@ -28,6 +28,7 @@ jobs:
           tags: virtuous-cycles:latest
           cache-from: type=gha,scope=test
       - run: docker run --rm virtuous-cycles:latest --help
+      - run: docker run --rm --entrypoint vc-py-cost virtuous-cycles:latest --help
 
   infer-fixture:
     runs-on: ubuntu-latest
