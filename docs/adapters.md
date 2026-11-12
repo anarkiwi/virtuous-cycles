@@ -136,3 +136,9 @@ report = ".work/cxx-cost.json"
 [metric.limits]
 "ns::Detector::detect:degree:kMaxBoxes" = 1   # fails at degree 2
 "*:degree:k*" = 2
+
+
+## `py-cost`
+
+The `cxx-cost` adapter over the report of [`vc-py-cost`](py-cost.md): the same
+keys and options, with `report` defaulting to `py-cost.json`.

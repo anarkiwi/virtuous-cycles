@@ -116,6 +116,10 @@ private:
 
 void writeJson(std::ostream &OS, const Program &P,
                const std::vector<Entry> &Entries);
+/// The merged summaries before composition, as JSON: functions with indices
+/// into a shared table of cost nodes, overriders, symbols and conflicts.
+void writeIr(std::ostream &OS, const Program &P,
+             const std::vector<std::string> &Patterns, bool Breakdown);
 
 } // namespace vc
 

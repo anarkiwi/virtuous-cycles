@@ -41,3 +41,10 @@ installs this package; its command runs `cxx-cost/scripts/test`: clang-format
 (LLVM style), the lit fixtures in `cxx-cost/test`, and a line-coverage gate
 (`COVERAGE_MIN`, default 85). To iterate against a checkout, mount it and pass
 a coverage build: `scripts/test BUILD/vc-cxx-cost`.
+
+## vc-py-cost
+
+`tests/test_pycost.py` builds `tests/py_cost/pyfix` with mypy once per test
+worker and checks each fixture function's polynomial and ledger. The `cxx-test`
+stage also checks the Python composition backend (`virtuous_cycles.cost`)
+against vc-cxx-cost on every lit fixture.

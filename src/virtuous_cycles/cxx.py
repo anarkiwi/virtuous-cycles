@@ -1,4 +1,5 @@
-"""``vc-cxx-cost`` adapter over its JSON cost report."""
+"""``cxx-cost`` and ``py-cost`` adapters over the JSON cost reports of
+``vc-cxx-cost`` and ``vc-py-cost``."""
 
 import json
 import math
@@ -48,21 +49,20 @@ def cost(terms, symbols):
     )
 
 
-@register("cxx-cost")
-def cxx_cost(options):
-    """Per-entry ``cost``, ``unbounded`` and ``degree:<symbol>`` from the report.
+def cost_report(options, adapter):
+    """Per-entry ``cost``, ``unbounded`` and ``degree:<symbol>`` from a report.
 
     See docs/adapters.md for the options.
     """
-    with open(options.get("report", "cxx-cost.json"), encoding="utf-8") as f:
+    with open(options.get("report", f"{adapter}.json"), encoding="utf-8") as f:
         report = json.load(f)
     if report.get("version") != VERSION:
         raise ValueError(
-            f"cxx-cost: unsupported report version {report.get('version')!r}"
+            f"{adapter}: unsupported report version {report.get('version')!r}"
         )
     values = set(options.get("values", VALUES))
     if values - set(VALUES):
-        raise ValueError(f"cxx-cost: values must be among {VALUES}: {sorted(values)}")
+        raise ValueError(f"{adapter}: values must be among {VALUES}: {sorted(values)}")
     globs = options.get("entries", ["*"])
     symbols = Symbols(report, options)
     out = {}
@@ -76,3 +76,15 @@ def cxx_cost(options):
         if "degree" in values:
             out.update({f"{name}:degree:{s}": float(d) for s, d in e["degree"].items()})
     return out
+
+
+@register("cxx-cost")
+def cxx_cost(options):
+    """The ``vc-cxx-cost`` report."""
+    return cost_report(options, "cxx-cost")
+
+
+@register("py-cost")
+def py_cost(options):
+    """The ``vc-py-cost`` report."""
+    return cost_report(options, "py-cost")

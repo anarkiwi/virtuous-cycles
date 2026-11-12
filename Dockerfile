@@ -16,7 +16,7 @@ CMD ["sh", "-c", "black --check src tests && pylint src && pylint --disable=miss
 
 FROM base AS runtime
 COPY . /src
-RUN pip install /src && rm -rf /src
+RUN pip install '/src[py-cost]' && rm -rf /src
 ENTRYPOINT ["virtuous-cycles"]
 
 # vc-cxx-cost (cxx-cost/): clang 20 from Ubuntu 24.04, so the binary also runs

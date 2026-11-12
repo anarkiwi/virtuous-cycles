@@ -43,10 +43,12 @@ echo 'budgets/*.json merge=virtuous-cycles' >> .gitattributes
 ## Docs
 
 - [docs/usage.md](docs/usage.md): configuration, commands, budget files, merging, CI.
-- [docs/adapters.md](docs/adapters.md): `infer-cost`, `json`, `command`, `cxx-cost`, and writing an adapter.
+- [docs/adapters.md](docs/adapters.md): `infer-cost`, `json`, `command`, `cxx-cost`, `py-cost`, and writing an adapter.
 - [docs/cxx-cost.md](docs/cxx-cost.md): `vc-cxx-cost`, a clang tool bounding C++
   worst-case cost as a polynomial in declared capacities, with a ledger of
   what it cannot bound.
+- [docs/py-cost.md](docs/py-cost.md): `vc-py-cost` (`pip install
+  'virtuous-cycles[py-cost]'`), the same bound for Python, built on mypy.
 - [docs/development.md](docs/development.md): tests and the Infer fixture.
 
 ## License

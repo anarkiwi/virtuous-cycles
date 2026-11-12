@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <unordered_map>
 
 namespace vc {
 
@@ -413,6 +414,141 @@ void writeJson(std::ostream &OS, const Program &P,
               });
           });
         });
+    });
+  });
+  SS.flush();
+  OS << Text << "\n";
+}
+
+static void writeSite(llvm::json::OStream &J, const Site &S) {
+  J.array([&] {
+    J.value(S.File);
+    J.value(S.Line);
+    J.value(S.Column);
+  });
+}
+
+static void writeTerms(llvm::json::OStream &J, const Poly &P) {
+  J.array([&] {
+    for (const auto &[M, C] : P.terms())
+      J.array([&] {
+        J.value(C);
+        J.object([&] {
+          for (const auto &[S, X] : M)
+            J.attribute(S, X);
+        });
+      });
+  });
+}
+
+void writeIr(std::ostream &OS, const Program &P,
+             const std::vector<std::string> &Patterns, bool Breakdown) {
+  std::unordered_map<const Cost *, size_t> Index;
+  std::vector<const Cost *> Nodes;
+  std::function<size_t(const Cost *)> Number = [&](const Cost *C) {
+    if (auto It = Index.find(C); It != Index.end())
+      return It->second;
+    for (const CostRef &K : C->Kids)
+      Number(K.get());
+    Nodes.push_back(C);
+    return Index[C] = Nodes.size() - 1;
+  };
+  for (const auto &[U, F] : P.Functions)
+    Number(F.Body.get());
+  static constexpr const char *Kinds[] = {"leaf", "sum",   "join",   "scale",
+                                          "call", "hoist", "targets"};
+  std::string Text;
+  llvm::raw_string_ostream SS(Text);
+  llvm::json::OStream J(SS);
+  J.object([&] {
+    J.attribute("version", 1);
+    J.attributeArray("entries", [&] {
+      for (const std::string &E : Patterns)
+        J.value(E);
+    });
+    J.attribute("breakdown", Breakdown);
+    J.attributeObject("program", [&] {
+      J.attributeObject("functions", [&] {
+        for (const auto &[U, F] : P.Functions)
+          J.attributeObject(U, [&] {
+            J.attribute("name", F.Name);
+            J.attribute("plain", F.Plain);
+            J.attributeBegin("at");
+            writeSite(J, F.At);
+            J.attributeEnd();
+            J.attribute("body", Index.at(F.Body.get()));
+            J.attributeArray("ledger", [&] {
+              for (const LedgerEntry &L : F.Ledger)
+                J.object([&] {
+                  J.attribute("kind", L.Kind);
+                  J.attribute("function", L.Function);
+                  J.attribute("reason", L.Reason);
+                  J.attributeBegin("at");
+                  writeSite(J, L.At);
+                  J.attributeEnd();
+                });
+            });
+            J.attributeBegin("recursion");
+            if (F.Recursion)
+              writeTerms(J, *F.Recursion);
+            else
+              J.value(nullptr);
+            J.attributeEnd();
+            J.attribute("loops", F.Loops);
+          });
+      });
+      J.attributeArray("nodes", [&] {
+        for (const Cost *C : Nodes)
+          J.object([&] {
+            J.attribute("k", Kinds[C->K]);
+            if (C->K == Cost::Leaf || C->K == Cost::Scale) {
+              J.attributeBegin("p");
+              writeTerms(J, C->P);
+              J.attributeEnd();
+            }
+            if (C->K == Cost::Call) {
+              J.attribute("usr", C->Usr);
+              J.attribute("callee", C->Callee);
+              J.attribute("virtual", C->Virtual);
+              J.attribute("pure", C->Pure);
+            }
+            if (C->K == Cost::Hoist)
+              J.attribute("run", C->Run);
+            if (C->K == Cost::Targets)
+              J.attributeArray("names", [&] {
+                for (const std::string &N : C->Names)
+                  J.value(N);
+              });
+            if (C->K == Cost::Call || C->K == Cost::Targets) {
+              J.attributeBegin("at");
+              writeSite(J, C->At);
+              J.attributeEnd();
+            }
+            if (!C->Kids.empty())
+              J.attributeArray("kids", [&] {
+                for (const CostRef &K : C->Kids)
+                  J.value(Index.at(K.get()));
+              });
+          });
+      });
+      J.attributeObject("overriders", [&] {
+        for (const auto &[U, O] : P.Overriders)
+          J.attributeArray(U, [&] {
+            for (const std::string &X : O)
+              J.value(X);
+          });
+      });
+      J.attributeObject("symbols", [&] {
+        for (const auto &[S, V] : P.Symbols)
+          if (V)
+            J.attribute(S, *V);
+          else
+            J.attribute(S, nullptr);
+      });
+      J.attributeArray("conflicts", [&] {
+        for (const std::string &S : P.Conflicts)
+          J.value(S);
+      });
     });
   });
   SS.flush();

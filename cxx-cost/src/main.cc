@@ -62,6 +62,11 @@ static cl::opt<bool>
     Breakdown("breakdown",
               cl::desc("Report the cost of every function an entry reaches"),
               cl::init(false), cl::cat(Category));
+static cl::opt<std::string>
+    EmitIr("emit-ir",
+           cl::desc("Write the merged per-function summaries, before "
+                    "composition, to this path"),
+           cl::cat(Category));
 static cl::opt<unsigned> Jobs("j", cl::desc("Parallel translation units"),
                               cl::init(0), cl::cat(Category));
 
@@ -278,6 +283,10 @@ int main(int Argc, const char **Argv) {
 
   std::string Error;
   std::vector<std::string> Patterns(Entries.begin(), Entries.end());
+  if (!EmitIr.empty()) {
+    std::ofstream OS(EmitIr);
+    vc::writeIr(OS, Program, Patterns, Breakdown);
+  }
   std::vector<vc::Entry> Result = Program.resolve(Patterns, Error, Breakdown);
   if (!Error.empty()) {
     llvm::errs() << "vc-cxx-cost: " << Error << "\n";
