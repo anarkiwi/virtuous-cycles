@@ -21,7 +21,7 @@ ENTRYPOINT ["virtuous-cycles"]
 
 # vc-cxx-cost (cxx-cost/): clang 20 from Ubuntu 24.04, so the binary also runs
 # in any Ubuntu 24.04 image that installs the `cxx-base` packages.
-FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 AS cxx-base
+FROM ubuntu:25.10@sha256:7cc5e35f6567ee8c66d2abb4aab0fd866669e6207c237c3a8f0947a5c7f17092 AS cxx-base
 ARG LLVM_VERSION=1:20.1.2-0ubuntu1~24.04.3
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libclang-cpp20=${LLVM_VERSION} libllvm20=${LLVM_VERSION} \
