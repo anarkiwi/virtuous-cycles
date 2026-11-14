@@ -22,13 +22,13 @@ pulls it and puts a `vc-cxx-cost` command on `PATH`:
 - run: vc-cxx-cost -p build --entry 'ns::Detector::detect' -o cxx-cost.json
 ```
 
-To build without Docker, on Ubuntu 24.04: `apt install clang-20 libclang-20-dev
-llvm-20-dev libclang-common-20-dev libclang-rt-20-dev libstdc++-14-dev cmake
+To build without Docker, on Ubuntu 26.04: `apt install clang-20 libclang-20-dev
+llvm-20-dev libclang-common-20-dev libclang-rt-20-dev libstdc++-15-dev cmake
 ninja-build`, then `CC=clang-20 CXX=clang++-20 cmake -S cxx-cost -B build -G Ninja
 -DCMAKE_PREFIX_PATH=/usr/lib/llvm-20 && cmake --build build`, and copy
 `vc-cxx-cost` to `/usr/lib/llvm-20/bin` (where it finds clang's builtin headers).
 
-The binary links Ubuntu 24.04's clang 20. To run it in another Ubuntu 24.04
+The binary links Ubuntu 26.04's clang 20. To run it in another Ubuntu 26.04
 image (one that has the project's headers), copy
 `/usr/lib/llvm-20/bin/vc-cxx-cost` from the `cxx-runtime` stage and install
 `libclang-cpp20 libllvm20 libclang-common-20-dev`; it must stay in
