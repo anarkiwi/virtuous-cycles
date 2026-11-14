@@ -1,3 +1,4 @@
+ARG LLVM_VERSION=1:20.1.8-2ubuntu8
 FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS base
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
     OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2
@@ -19,17 +20,17 @@ COPY . /src
 RUN pip install '/src[py-cost]' && rm -rf /src
 ENTRYPOINT ["virtuous-cycles"]
 
-# vc-cxx-cost (cxx-cost/): clang 20 from Ubuntu 24.04, so the binary also runs
-# in any Ubuntu 24.04 image that installs the `cxx-base` packages.
-FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 AS cxx-base
-ARG LLVM_VERSION=1:20.1.2-0ubuntu1~24.04.3
+# vc-cxx-cost (cxx-cost/): clang 20 from Ubuntu 26.04, so the binary also runs
+# in any Ubuntu 26.04 image that installs the `cxx-base` packages.
+FROM ubuntu:26.04@sha256:065aa8626841f16057b78b027b464cd59c4fac36c204c72dcbf48d66f5fa8a96 AS cxx-base
+ARG LLVM_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libclang-cpp20=${LLVM_VERSION} libllvm20=${LLVM_VERSION} \
-      libclang-common-20-dev=${LLVM_VERSION} libstdc++-14-dev libc6-dev \
+      libclang-common-20-dev=${LLVM_VERSION} libstdc++-15-dev libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 FROM cxx-base AS cxx-toolchain
-ARG LLVM_VERSION=1:20.1.2-0ubuntu1~24.04.3
+ARG LLVM_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends \
       clang-20=${LLVM_VERSION} libclang-20-dev=${LLVM_VERSION} \
       llvm-20-dev=${LLVM_VERSION} llvm-20-tools=${LLVM_VERSION} \
