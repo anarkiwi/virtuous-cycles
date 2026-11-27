@@ -231,7 +231,7 @@ def _ident_start(c: str) -> bool:
 
 
 def _ident_char(c: str) -> bool:
-    return c.isascii() and (c.isalnum() or c == "_")
+    return _ident_start(c) or (c.isascii() and c.isdigit())
 
 
 class _Parser:
