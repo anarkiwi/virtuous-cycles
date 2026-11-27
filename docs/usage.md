@@ -15,12 +15,27 @@ config file's directory; commands run there.
 | `select`    | `["*"]`        | `fnmatch` globs (case-sensitive); a key is kept if any matches |
 | `options`   | `{}`           | passed to the adapter                                    |
 | `limits`    | `{}`           | `fnmatch` glob to a hard limit (below)                   |
+| `tolerance` | `{}`           | `fnmatch` glob to a relative fraction `>= 0` (below)     |
 
 A key is held to the strictest limit whose glob matches it (the smallest for
 `lower`, the largest for `higher`), whatever its budget: `check` fails with
 `<metric>: <key>: <value> over limit <limit>`, `report` shows `over`, and
 `tighten` ignores limits. Degrees are integers, so `limits = {"*:degree:n" = 1}`
 fails at degree 2.
+
+`tolerance` lets `check` accept a value slightly worse than its budget. A key
+fails only if its value is worse than `budget * (1 + tolerance)` for `lower`, or
+`budget * (1 - tolerance)` for `higher`; a value exactly at that bound passes.
+When several globs match, the smallest tolerance applies; a key matching none
+has tolerance 0, the exact comparison. `tighten` ignores tolerance: it writes a
+value only if strictly better than the budget and never raises a budget, so
+tolerated rises do not compound.
+
+```toml
+[metric.tolerance]
+"*:size" = 0.05
+"*:locals" = 0.05
+```
 
 ## Commands
 

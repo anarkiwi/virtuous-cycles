@@ -5,3 +5,4 @@ pytest-cov==7.1.0
 pytest-xdist==3.8.0
 tqdm==4.70.1
 mypy==2.4.1
+pysayme==0.4.0

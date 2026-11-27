@@ -7,9 +7,16 @@ from pathlib import Path
 DIRECTIONS = ("lower", "higher")
 
 
-def worse(value, budget, direction):
-    """True if ``value`` is worse than ``budget`` in ``direction``."""
-    return value > budget if direction == "lower" else value < budget
+def worse(value, budget, direction, tolerance=0):
+    """True if ``value`` is worse than ``budget`` by more than ``tolerance``.
+
+    ``tolerance`` is a fraction of ``budget``: the bound is
+    ``budget * (1 + tolerance)`` for "lower" and ``budget * (1 - tolerance)``
+    for "higher".
+    """
+    if direction == "lower":
+        return value > budget * (1 + tolerance)
+    return value < budget * (1 - tolerance)
 
 
 def stricter(a, b, direction):
