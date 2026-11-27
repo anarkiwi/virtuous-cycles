@@ -167,7 +167,7 @@ class Polynomial:
         return float(self.default)
 
 
-def mangled(path):
+def mangled(path: str | os.PathLike):
     """``path`` as Infer spells it in a name: ``/`` and space become ``_``."""
     return str(path).translate(str.maketrans("/ ", "__"))
 

@@ -154,10 +154,19 @@ def var(e):
     return None
 
 
+def func_is(node, test):
+    """True if ``node`` is a function that satisfies ``test``."""
+    f = func_of(node)
+    if f is None:
+        return False
+    return bool(test(f))
+
+
 def abstract(node):
     """True if ``node`` has no body to run."""
-    f = func_of(node)
-    return f is not None and getattr(f, "abstract_status", 0) != nodes.NOT_ABSTRACT
+    return func_is(
+        node, lambda f: getattr(f, "abstract_status", 0) != nodes.NOT_ABSTRACT
+    )
 
 
 STORES = {
@@ -213,8 +222,7 @@ class Analysis:  # pylint: disable=too-many-instance-attributes
 
     def analysed(self, node):
         """True if ``node``'s body is summarised."""
-        f = func_of(node)
-        return f is not None and id(f) in self.funcs
+        return func_is(node, lambda f: id(f) in self.funcs)
 
     def implementers(self, info):
         """The analysed classes that implement protocol ``info`` structurally."""

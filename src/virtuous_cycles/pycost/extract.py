@@ -294,19 +294,21 @@ class Extractor(Bounds):
             t, lv.name, lv, [], implicit=True, setter=name == "__setitem__"
         )
 
+    def _target(self, lv, name, rvalue=None):
+        """Accessing target ``lv`` through ``name``, unpacking tuples."""
+        if isinstance(lv, (nodes.TupleExpr, nodes.ListExpr)):
+            return total(self._target(x, name) for x in lv.items)
+        if isinstance(lv, nodes.StarExpr):
+            return self._target(lv.expr, name)
+        return Cost.sum(self._object(lv), self._access(lv, name, rvalue))
+
     def _store(self, lv, rvalue):
         """Assigning ``rvalue`` to ``lv``."""
-        if isinstance(lv, (nodes.TupleExpr, nodes.ListExpr)):
-            return total(self._store(x, None) for x in lv.items)
-        if isinstance(lv, nodes.StarExpr):
-            return self._store(lv.expr, None)
-        return Cost.sum(self._object(lv), self._access(lv, "__setitem__", rvalue))
+        return self._target(lv, "__setitem__", rvalue)
 
     def _delete(self, e):
         """``del e``."""
-        if isinstance(e, (nodes.TupleExpr, nodes.ListExpr)):
-            return total(self._delete(x) for x in e.items)
-        return Cost.sum(self._object(e), self._access(e, "__delitem__"))
+        return self._target(e, "__delitem__")
 
     def exprs(self, xs):
         """A sequence of expressions."""

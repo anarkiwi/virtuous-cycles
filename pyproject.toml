@@ -32,13 +32,3 @@ disable = ["too-few-public-methods", "too-many-instance-attributes", "too-many-a
 
 [tool.pysayme]
 roots = ["src"]
-
-[tool.pysayme.allow]
-"src/virtuous_cycles/budget.py:fmt -> mypyc.codegen.emit:stable_literal_repr" = "formats a metric value for reports; unrelated to mypyc literal emission"
-"src/virtuous_cycles/infer.py:mangled -> mypyc.codegen.emit:stable_literal_repr" = "path to Infer's name spelling; unrelated to mypyc literal emission"
-"src/virtuous_cycles/cost/poly.py:_ident_char -> src/virtuous_cycles/cost/poly.py:_ident_start" = "start and continue character classes differ by digits"
-"src/virtuous_cycles/pycost/bounds.py:Bounds._tightest -> src/virtuous_cycles/pycost/bounds.py:Bounds._minmax" = "different combine rule and None handling"
-"src/virtuous_cycles/pycost/extract.py:Extractor._delete -> src/virtuous_cycles/pycost/extract.py:Extractor._store" = "del and assignment cost different dunder accesses"
-"src/virtuous_cycles/pycost/scan.py:abstract -> mypy.checker:is_string_literal" = "tests a function's abstract status; unrelated to string literals"
-"src/virtuous_cycles/pycost/scan.py:Analysis.analysed -> mypy.checker:is_string_literal" = "tests membership of the analysed set; unrelated to string literals"
-"src/virtuous_cycles/pycost/scan.py:Analysis.analysed -> src/virtuous_cycles/pycost/scan.py:abstract" = "different predicates over func_of"

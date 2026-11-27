@@ -89,7 +89,10 @@ def merge(base, ours, theirs, direction):
     return out
 
 
-def fmt(value):
+Metric = float | None
+
+
+def fmt(value: Metric):
     """Compact human formatting for a metric value."""
     if value is None:
         return "-"

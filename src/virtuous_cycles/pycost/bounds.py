@@ -246,13 +246,21 @@ class Bounds(Context):
     def _filter(self, args):
         return self.shape(args[1]) if len(args) == 2 else None
 
-    def _tightest(self, seqs):
+    def _fold(self, args, combine, skip_unknown):
+        """``combine`` over the sizes of ``args``; an unknown size is skipped
+        or, unless ``skip_unknown``, makes the whole bound unknown."""
         best = None
-        for x in seqs:
-            s = self.size(x)
-            if s is not None:
-                best = s if best is None else Poly.tighter(best, s)
+        for a in args:
+            p = self.size(a)
+            if p is None:
+                if not skip_unknown:
+                    return None
+            else:
+                best = p if best is None else combine(best, p)
         return _single(best)
+
+    def _tightest(self, seqs):
+        return self._fold(seqs, Poly.tighter, True)
 
     def _map(self, args):
         return self._tightest(args[1:])
@@ -270,15 +278,7 @@ class Bounds(Context):
         """``min``/``max`` of integers: the tighter bound, or both."""
         if len(args) < 2:
             return None
-        best = None
-        for a in args:
-            p = self.size(a)
-            if p is None:
-                if combine is Poly.join:
-                    return None
-            else:
-                best = p if best is None else combine(best, p)
-        return _single(best)
+        return self._fold(args, combine, combine is not Poly.join)
 
     def int_bound(self, e):
         """Bounds of integer arithmetic, as for C++ ``bound``."""
