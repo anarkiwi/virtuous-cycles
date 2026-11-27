@@ -13,7 +13,7 @@ FROM deps AS test
 ENV PYTHONPATH=/src/src PYTHONDONTWRITEBYTECODE=1
 WORKDIR /src
 COPY . .
-CMD ["sh", "-c", "black --check src tests && pylint src && pylint --disable=missing-docstring,redefined-outer-name tests && pytest -p no:cacheprovider"]
+CMD ["sh", "-c", "black --check src tests && pylint src && pylint --disable=missing-docstring,redefined-outer-name tests && pytest -p no:cacheprovider && pysayme check --behaviour src"]
 
 FROM base AS runtime
 COPY . /src
