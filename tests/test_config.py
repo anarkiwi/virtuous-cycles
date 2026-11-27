@@ -77,3 +77,45 @@ def test_limits_strictest_matching_glob(tmp_path):
 def test_invalid_limits(tmp_path, limits):
     with pytest.raises(ValueError, match="limits"):
         config.load(write(tmp_path, ONE + limits))
+
+
+def test_tolerance_parsed_and_defaults(tmp_path):
+    assert load_one(tmp_path, ONE).tolerance == {}
+    m = load_one(tmp_path, ONE + '[metric.tolerance]\n"*:size" = 0.05\n"a" = 0\n')
+    assert m.tolerance == {"*:size": 0.05, "a": 0}
+
+
+def test_tolerance_smallest_matching_glob_both_directions():
+    tol = {"*": 0.5, "a:*": 0.25, "a:size": 0.125}
+    for direction in ("lower", "higher"):
+        m = config.Metric("n", "json", "b", direction=direction, tolerance=tol)
+        assert m.tolerance_for("a:size") == 0.125
+        assert m.tolerance_for("a:locals") == 0.25
+        assert m.tolerance_for("b:size") == 0.5
+    assert config.Metric("n", "json", "b").tolerance_for("a") == 0
+
+
+def test_regressed_bound_lower_and_higher():
+    low = config.Metric("n", "json", "b", tolerance={"a": 0.25})
+    assert not low.regressed("a", 125, 100)
+    assert low.regressed("a", 126, 100)
+    assert low.regressed("z", 101, 100)
+    assert not low.regressed("z", 100, 100)
+    high = config.Metric("n", "json", "b", direction="higher", tolerance={"a": 0.25})
+    assert not high.regressed("a", 75, 100)
+    assert high.regressed("a", 74, 100)
+    assert high.regressed("z", 99, 100)
+
+
+@pytest.mark.parametrize(
+    "tol",
+    [
+        "tolerance = 0.1\n",
+        '[metric.tolerance]\n"*" = -0.1\n',
+        '[metric.tolerance]\n"*" = true\n',
+        '[metric.tolerance]\n"*" = "0.1"\n',
+    ],
+)
+def test_invalid_tolerance(tmp_path, tol):
+    with pytest.raises(ValueError, match="tolerance"):
+        config.load(write(tmp_path, ONE + tol))

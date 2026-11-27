@@ -20,6 +20,7 @@ class Metric:
     select: tuple = ("*",)
     options: dict = field(default_factory=dict)
     limits: dict = field(default_factory=dict)
+    tolerance: dict = field(default_factory=dict)
 
     def selected(self, values):
         """``values`` restricted to keys matching any ``select`` glob."""
@@ -34,10 +35,29 @@ class Metric:
         found = [v for g, v in self.limits.items() if fnmatchcase(key, g)]
         return (min if self.direction == "lower" else max)(found, default=None)
 
+    def tolerance_for(self, key):
+        """The smallest tolerance whose glob matches ``key``, or 0."""
+        found = [v for g, v in self.tolerance.items() if fnmatchcase(key, g)]
+        return min(found, default=0)
+
+    def regressed(self, key, value, budget_value):
+        """True if ``value`` is worse than ``key``'s budget beyond its tolerance."""
+        return worse(value, budget_value, self.direction, self.tolerance_for(key))
+
     def over(self, key, value):
         """True if ``value`` is worse than ``key``'s limit."""
         lim = self.limit(key)
         return lim is not None and worse(value, lim, self.direction)
+
+
+def number_table(i, m, name):
+    """The ``name`` field of metric ``m`` as a table of glob to number."""
+    table = m.get(name, {})
+    if not isinstance(table, dict) or any(
+        isinstance(v, bool) or not isinstance(v, (int, float)) for v in table.values()
+    ):
+        raise ValueError(f"metric {i}: {name} must be a table of glob to number")
+    return dict(table)
 
 
 def load(path):
@@ -54,17 +74,17 @@ def load(path):
             "select",
             "options",
             "limits",
+            "tolerance",
         }
         if unknown:
             raise ValueError(f"metric {i}: unknown fields {sorted(unknown)}")
         if "adapter" not in m or "budget" not in m:
             raise ValueError(f"metric {i}: 'adapter' and 'budget' are required")
-        select, limits = m.get("select", ["*"]), m.get("limits", {})
-        if not isinstance(limits, dict) or any(
-            isinstance(v, bool) or not isinstance(v, (int, float))
-            for v in limits.values()
-        ):
-            raise ValueError(f"metric {i}: limits must be a table of glob to number")
+        select = m.get("select", ["*"])
+        limits = number_table(i, m, "limits")
+        tolerance = number_table(i, m, "tolerance")
+        if any(v < 0 for v in tolerance.values()):
+            raise ValueError(f"metric {i}: tolerance values must be >= 0")
         metric = Metric(
             name=m.get("name", m["adapter"]),
             adapter=m["adapter"],
@@ -72,7 +92,8 @@ def load(path):
             direction=m.get("direction", "lower"),
             select=tuple([select] if isinstance(select, str) else select),
             options=dict(m.get("options", {})),
-            limits=dict(limits),
+            limits=limits,
+            tolerance=tolerance,
         )
         if metric.direction not in DIRECTIONS:
             raise ValueError(f"{metric.name}: direction must be one of {DIRECTIONS}")

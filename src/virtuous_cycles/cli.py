@@ -33,7 +33,7 @@ def rows(metric, values, budgets):
             status = "over"
         elif b is None:
             status = "new"
-        elif budget.worse(v, b, metric.direction):
+        elif metric.regressed(k, v, b):
             status = "worse"
         elif budget.worse(b, v, metric.direction):
             status = "better"

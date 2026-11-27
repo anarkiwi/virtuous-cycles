@@ -3,7 +3,8 @@
 Hold numeric code metrics to committed budgets that can only get stricter: a
 ratchet, like [imbue-ai/ratchets](https://github.com/imbue-ai/ratchets) for lint
 counts, but for any per-key number (Infer cost degree, coverage, sizes, ...).
-Metrics may also carry hard limits.
+Metrics may also carry hard limits and a per-key relative `tolerance`
+(`tolerance = {"*:size" = 0.05}`) that `check` allows above the budget.
 
 ## Install
 

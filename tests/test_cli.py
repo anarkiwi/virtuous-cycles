@@ -227,3 +227,82 @@ def test_limits_fail_check_within_budget(project, capsys):
     }
     put(project, {"f1": 2, "f2": 3, "g": 1}, {"a": 85})
     assert run("check") == 0
+
+
+def tolerate(root, table):
+    path = root / "virtuous-cycles.toml"
+    text = path.read_text().replace(
+        'path = "cost.*"\n', f'path = "cost.*"\n[metric.tolerance]\n{table}\n'
+    )
+    path.write_text(text)
+
+
+def statuses(capsys):
+    capsys.readouterr()
+    assert run("report", "--json") == 0
+    return {
+        (r["metric"], r["key"]): r["status"]
+        for r in json.loads(capsys.readouterr().out)
+    }
+
+
+def test_tolerance_glob_precedence_in_check_and_report(project, capsys):
+    run("tighten")
+    tolerate(project, '"f*" = 0.5\n"f2" = 0.25')
+    put(project, {"f1": 3, "f2": 5, "g": 1}, {"a": 80})
+    capsys.readouterr()
+    assert run("check") == 0
+    assert statuses(capsys) == {
+        ("cost", "f1"): "ok",
+        ("cost", "f2"): "ok",
+        ("cost", "g"): "ok",
+        ("cov", "a"): "ok",
+    }
+    put(project, {"f1": 4, "f2": 6, "g": 2}, {"a": 80})
+    capsys.readouterr()
+    assert run("check") == 1
+    assert capsys.readouterr().out.splitlines() == [
+        "cost: f1: 4 worse than budget 2",
+        "cost: f2: 6 worse than budget 4",
+        "cost: g: 2 worse than budget 1",
+    ]
+
+
+def test_tolerance_exact_bound_then_one_over(project, capsys):
+    run("tighten")
+    tolerate(project, '"f2" = 0.25')
+    put(project, {"f1": 2, "f2": 5, "g": 1}, {"a": 80})
+    capsys.readouterr()
+    assert run("check") == 0
+    put(project, {"f1": 2, "f2": 6, "g": 1}, {"a": 80})
+    capsys.readouterr()
+    assert run("check") == 1
+    assert capsys.readouterr().out.splitlines() == ["cost: f2: 6 worse than budget 4"]
+
+
+def test_tolerance_higher_direction(project, capsys):
+    run("tighten")
+    path = project / "virtuous-cycles.toml"
+    path.write_text(
+        path.read_text().replace(
+            'path = "cov.*"\n', 'path = "cov.*"\n[metric.tolerance]\n"a" = 0.25\n'
+        )
+    )
+    put(project, {"f1": 2, "f2": 4, "g": 1}, {"a": 60})
+    capsys.readouterr()
+    assert run("check") == 0
+    put(project, {"f1": 2, "f2": 4, "g": 1}, {"a": 59})
+    capsys.readouterr()
+    assert run("check") == 1
+    assert capsys.readouterr().out.splitlines() == ["cov: a: 59 worse than budget 80"]
+
+
+def test_tighten_never_raises_budget_after_tolerated_rise(project):
+    run("tighten")
+    tolerate(project, '"f2" = 0.25')
+    put(project, {"f1": 2, "f2": 5, "g": 1}, {"a": 80})
+    assert run("tighten") == 0
+    assert budget.load(project / "budgets" / "cost.json", "lower")["f2"] == 4
+    assert run("check") == 0
+    put(project, {"f1": 2, "f2": 6, "g": 1}, {"a": 80})
+    assert run("check") == 1
